@@ -42,7 +42,9 @@ namespace Amnesia
 				};
 
 				if (Module.Transaction != null)
-					throw new InvalidOperationException("Must end prior session before starting a new one");
+				{
+					(new EndSessionRequest()).Execute();
+				}
 
 				Module.Transaction = Transaction;
 				Module.rootThread = System.Threading.Thread.CurrentThread.ManagedThreadId;
@@ -74,16 +76,6 @@ namespace Amnesia
 			internal override EndSessionResponse Execute()
 			{
 				Module.Transaction = null;
-
-				//lock (Module.Sessions)
-				//{
-				//    Module.Sessions.Remove(SessionID);
-				//}
-
-				//Transaction transaction;
-				//if (Module.Sessions.TryGetValue(SessionID, out transaction))
-				//{
-				//}
 
 				return new EndSessionResponse();
 			}
