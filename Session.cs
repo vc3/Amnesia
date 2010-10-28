@@ -88,6 +88,14 @@ namespace Amnesia
 		}
 
 		/// <summary>
+		/// Indicates if the current thread is associated with a session
+		/// </summary>
+		public static bool IsActive
+		{
+			get { return Module.Transaction != null; }
+		}
+
+		/// <summary>
 		/// Raised when the session is ended.  This event will be raised by
 		/// a thread other than the one that created the session and can be 
 		/// raised at anytime without warning.
