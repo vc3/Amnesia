@@ -60,7 +60,7 @@ namespace Amnesia
 
 		public Session(string appUrl)
 		{
-			this.serviceUrl = appUrl + "/Amnesia.axd";
+			this.serviceUrl = appUrl + Amnesia.Settings.Current.HandlerPath;
 
 			// Start a new distributed transaction
 			TxScope = new TransactionScope(TransactionScopeOption.Required, TransactionTimeout);

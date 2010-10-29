@@ -24,6 +24,9 @@ namespace Amnesia
 			HttpWebRequest http = (HttpWebRequest)WebRequest.Create(serviceUrl);
 			http.Method = "POST";
 
+			//if(Amnesia.Settings.Current.AuthenticationMode == AuthenticationMode.Windows)
+			//    http.Credentials = System.Net.CredentialCache.DefaultNetworkCredentials;
+
 			using (StreamWriter writer = new StreamWriter(http.GetRequestStream()))
 			{
 				writer.Write(reqPayload);
