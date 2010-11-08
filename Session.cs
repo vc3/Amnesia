@@ -10,6 +10,7 @@ namespace Amnesia
 	public class Session : IDisposable
 	{
 		static TimeSpan TransactionTimeout = TimeSpan.Zero;
+		static EventHandler afterSessionEnded;
 
 		public string ID;
 
@@ -18,7 +19,6 @@ namespace Amnesia
 		EventHandler onAbortedAsync;
 		bool wasAbortedAsync = false;
 		private bool isDisposed;
-
 
 		#region AbortNotification
 		class AbortNotification : IEnlistmentNotification
@@ -96,6 +96,15 @@ namespace Amnesia
 		}
 
 		/// <summary>
+		/// Raised just after a session is ended
+		/// </summary>
+		public static event EventHandler AfterSessionEnded
+		{
+			add { afterSessionEnded += value; }
+			remove { afterSessionEnded -= value; }
+		}
+
+		/// <summary>
 		/// Raised when the session is ended.  This event will be raised by
 		/// a thread other than the one that created the session and can be 
 		/// raised at anytime without warning.
@@ -114,6 +123,14 @@ namespace Amnesia
 			get { return wasAbortedAsync; }
 		}
 
+		internal static void End()
+		{
+			Module.Transaction = null;
+
+			if (afterSessionEnded != null)
+				afterSessionEnded(null, EventArgs.Empty);
+		}
+
 		public void Dispose()
 		{
 			isDisposed = true;
@@ -128,5 +145,6 @@ namespace Amnesia
 			// Notify the server of the end of the session
 			(new Handler.EndSessionRequest() { SessionID = ID }).Send(serviceUrl);
 		}
+
 	}
 }

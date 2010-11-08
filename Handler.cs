@@ -51,7 +51,7 @@ namespace Amnesia
 
 				Transaction.TransactionCompleted += delegate
 				{
-					Module.Transaction = null;
+					Session.End();
 				};
 
 				//Module.Sessions.Add(response.SessionID, Transaction);
@@ -75,7 +75,7 @@ namespace Amnesia
 
 			internal override EndSessionResponse Execute()
 			{
-				Module.Transaction = null;
+				Session.End();
 
 				return new EndSessionResponse();
 			}
