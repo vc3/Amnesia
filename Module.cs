@@ -17,10 +17,21 @@ namespace Amnesia
 		{
 		}
 
+		bool IsHandlerRequest
+		{
+			get
+			{
+				return HttpContext.Current.Request.RawUrl.ToLower().Contains(Settings.Current.HandlerPath.ToLower());
+			}
+		}
+
 		public void Init(HttpApplication context)
 		{
 			context.BeginRequest += delegate
 			{
+				if (IsHandlerRequest)
+					return;
+
 				if (Transaction != null)
 				{
 					lock(threads)
