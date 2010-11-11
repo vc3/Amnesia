@@ -8,11 +8,9 @@ namespace Amnesia
 	public class Module : IHttpModule
 	{
 		static internal Transaction Transaction;
-		internal static int rootThread;
-		static List<int> threads = new List<int>();
 
 		static object itemsKey = new object();
-
+		
 		public void Dispose()
 		{
 		}
@@ -34,12 +32,6 @@ namespace Amnesia
 
 				if (Transaction != null)
 				{
-					lock(threads)
-					{
-						if(!threads.Contains(System.Threading.Thread.CurrentThread.ManagedThreadId))
-							threads.Add(System.Threading.Thread.CurrentThread.ManagedThreadId);
-					}
-
 					// join the distributed transaction prior to request
 					TransactionScope scope = new TransactionScope(Transaction.DependentClone(DependentCloneOption.BlockCommitUntilComplete), TimeSpan.Zero);
 					HttpContext.Current.Items[itemsKey] = scope;

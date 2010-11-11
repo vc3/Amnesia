@@ -47,7 +47,6 @@ namespace Amnesia
 				}
 
 				Module.Transaction = Transaction;
-				Module.rootThread = System.Threading.Thread.CurrentThread.ManagedThreadId;
 
 				Transaction.TransactionCompleted += delegate
 				{
