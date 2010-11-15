@@ -12,8 +12,6 @@ namespace Amnesia
 		static TimeSpan TransactionTimeout = TimeSpan.Zero;
 		static EventHandler afterSessionEnded;
 
-		public string ID;
-
 		internal TransactionScope TxScope;
 		string serviceUrl;
 		EventHandler onAbortedAsync;
@@ -53,11 +51,17 @@ namespace Amnesia
 		}
 		#endregion
 
+		/// <summary>
+		/// Starts a new Amnesia session with a remote application
+		/// </summary>
 		public Session(Uri appUrl)
 			: this(appUrl.ToString())
 		{
 		}
 
+		/// <summary>
+		/// Starts a new Amnesia session with a remote application
+		/// </summary>
 		public Session(string appUrl)
 		{
 			this.serviceUrl = appUrl + Amnesia.Settings.Current.HandlerPath;
@@ -69,7 +73,7 @@ namespace Amnesia
 			request.Transaction = tx;
 
 			var response = request.Send(serviceUrl);
-			ID = response.SessionID;
+			IsActive = true;
 
 			// Monitor the distributed transaction in order to detect if its aborted remotely.
 			tx.EnlistVolatile(new AbortNotification((o, e) =>
@@ -92,7 +96,8 @@ namespace Amnesia
 		/// </summary>
 		public static bool IsActive
 		{
-			get { return Module.Transaction != null; }
+			get;
+			internal set;
 		}
 
 		/// <summary>
@@ -123,10 +128,11 @@ namespace Amnesia
 			get { return wasAbortedAsync; }
 		}
 
-		internal static void End()
+		/// <summary>
+		/// Called by a single thread when the session has ended
+		/// </summary>
+		internal static void RaiseAfterSessionEnded()
 		{
-			Module.Transaction = null;
-
 			if (afterSessionEnded != null)
 				afterSessionEnded(null, EventArgs.Empty);
 		}
@@ -134,6 +140,7 @@ namespace Amnesia
 		public void Dispose()
 		{
 			isDisposed = true;
+			IsActive = false;
 
 			// transaction is completing due to local code so disable the AbortedAsync event
 			onAbortedAsync = null;
@@ -143,7 +150,7 @@ namespace Amnesia
 			TxScope.Dispose();
 
 			// Notify the server of the end of the session
-			(new Handler.EndSessionRequest() { SessionID = ID }).Send(serviceUrl);
+			(new Handler.EndSessionRequest()).Send(serviceUrl);
 		}
 
 	}

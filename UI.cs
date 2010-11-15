@@ -5,6 +5,7 @@ using System.Text;
 using System.Web;
 using System.Transactions;
 using System.Threading;
+using System.IO;
 
 namespace Amnesia
 {
@@ -13,9 +14,11 @@ namespace Amnesia
 		static TransactionScope rootScope;
 		static Transaction rootTransaction;
 		static Thread scopeThread;
-		static Mutex sessionEnded;
 		static ManualResetEvent requestThreadProceed = new ManualResetEvent(false);
 		static ManualResetEvent scopeThreadProceed = new ManualResetEvent(false);
+
+		[ThreadStatic]
+		static TransactionScope currentScope;
 
 		public static void ProcessRequest(HttpContext ctx)
 		{
@@ -67,7 +70,6 @@ namespace Amnesia
 					scopeThreadProceed.Set();
 					requestThreadProceed.WaitOne();
 					scopeThread = null;
-					sessionEnded = null;
 				}
 			}
 
@@ -76,16 +78,33 @@ namespace Amnesia
 					<html>
 					<body>");
 
-			if(Module.Transaction == null)
+			if(!Session.IsActive)
 				ctx.Response.Write(@"<a href='?start'>Start Session</a>");
 			else
-				ctx.Response.Write(string.Format(@"
-					Session began at {0}: <a href='?end'>End Session</a>",
-					Module.Transaction.TransactionInformation.CreationTime));
+				ctx.Response.Write(string.Format(@"SESSION ACTIVE -- <a href='?end'>End Session</a>"));
 
 			ctx.Response.Write(@"<br /><br /><a href='?status'>Refresh Status</a>");
 
+
+			ctx.Response.Write(@"<br /><br /><h2>Thread Pool</h2><ol>");
+			object mutex = new object();
+			ThreadUtil.ForAllThreads(delegate
+			{
+				lock (mutex)
+				{
+					string transaction;
+
+					if(Transaction.Current == null)
+						transaction = "--";
+					else
+						transaction = Transaction.Current.TransactionInformation.DistributedIdentifier.ToString();
+
+					ctx.Response.Write(string.Format(@"<li>[thread {0}] Transaction: {1}", Thread.CurrentThread.ManagedThreadId, transaction));
+				}
+			});
+
 			ctx.Response.Write(@"
+				</ul>
 				</body>
 				</html>");
 		}
