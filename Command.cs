@@ -37,7 +37,15 @@ namespace Amnesia
 			using (StreamReader reader = new StreamReader(http.GetResponse().GetResponseStream()))
 				respPayload = reader.ReadToEnd();
 
-			return (TResponse)SerializationUtil.DeserializeBase64(respPayload);
+			object response = SerializationUtil.DeserializeBase64(respPayload);
+
+			if (response is Handler.ErrorResponse)
+			{
+				var errorResponse = (Handler.ErrorResponse)response;
+				throw new ApplicationException(string.Format("Amnesia Handler Error: {0}\nException: {1}\nStack Track: {2}", errorResponse.Message, errorResponse.ExceptionType, errorResponse.StackTrace));
+			}
+
+			return (TResponse)response;
 		}
 
 		object ICommand.Execute()

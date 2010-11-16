@@ -27,20 +27,39 @@ namespace Amnesia
 
 		public void ProcessRequest(HttpContext ctx)
 		{
-			if (ctx.Request.Url.GetComponents(UriComponents.Path, UriFormat.Unescaped).ToLower().EndsWith("/ui"))
-				UI.ProcessRequest(ctx);
-			else
+			try
 			{
-				string reqPayload;
+				if (ctx.Request.Url.GetComponents(UriComponents.Path, UriFormat.Unescaped).ToLower().EndsWith("/ui"))
+					UI.ProcessRequest(ctx);
+				else
+				{
+					string reqPayload;
 
-				using (StreamReader reader = new StreamReader(ctx.Request.InputStream))
-					reqPayload = reader.ReadToEnd();
+					using (StreamReader reader = new StreamReader(ctx.Request.InputStream))
+						reqPayload = reader.ReadToEnd();
 
-				ICommand command = (ICommand)SerializationUtil.DeserializeBase64(reqPayload);
-				object response = command.Execute();
-				ctx.Response.Write(SerializationUtil.SerializeBase64(response));
+					ICommand command = (ICommand)SerializationUtil.DeserializeBase64(reqPayload);
+					command = null;
+					object response = command.Execute();
+					ctx.Response.Write(SerializationUtil.SerializeBase64(response));
+				}
+			}
+			catch (Exception error)
+			{
+				var errorResponse = new ErrorResponse(){Message = error.Message, ExceptionType= error.GetType().FullName, StackTrace=error.StackTrace};
+				ctx.Response.Write(SerializationUtil.SerializeBase64(errorResponse));
 			}
 		}
+
+		#region ErrorResponse
+		[Serializable]
+		internal class ErrorResponse
+		{
+			public string Message { get; set; }
+			public string ExceptionType { get; set; }
+			public string StackTrace { get; set; }
+		}
+		#endregion
 
 		#region StartSession
 		/// <summary>
