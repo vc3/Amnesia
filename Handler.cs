@@ -39,7 +39,6 @@ namespace Amnesia
 						reqPayload = reader.ReadToEnd();
 
 					ICommand command = (ICommand)SerializationUtil.DeserializeBase64(reqPayload);
-					command = null;
 					object response = command.Execute();
 					ctx.Response.Write(SerializationUtil.SerializeBase64(response));
 				}
