@@ -145,12 +145,12 @@ namespace Amnesia
 			// transaction is completing due to local code so disable the AbortedAsync event
 			onAbortedAsync = null;
 
-			// Tear down the local transaction scope.
-			Transaction.Current.Rollback();			
-			TxScope.Dispose();
-
-			// Notify the server of the end of the session
+			// Notify the server of the end of the session. This will rollback the transaction server-side.
 			(new Handler.EndSessionRequest()).Send(serviceUrl);
+
+			// Now that server is aware, tear down the local transaction scope.
+			Transaction.Current.Rollback();
+			TxScope.Dispose();
 		}
 
 	}

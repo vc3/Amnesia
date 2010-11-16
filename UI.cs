@@ -22,7 +22,9 @@ namespace Amnesia
 
 		public static void ProcessRequest(HttpContext ctx)
 		{
-			if (ctx.Request.QueryString.ToString() == "start")
+			bool silent = string.IsNullOrEmpty(ctx.Request.QueryString["silent"]);
+
+			if (ctx.Request.QueryString["cmd"] == "start")
 			{
 				if (scopeThread != null)
 					throw new InvalidOperationException("Session is already started");
@@ -57,7 +59,7 @@ namespace Amnesia
 				// use the transaction created by the scopeThread
 				(new Handler.StartSessionRequest() { Transaction = rootTransaction }).Execute();
 			}
-			else if (ctx.Request.QueryString.ToString() == "end")
+			else if (ctx.Request.QueryString["cmd"] == "end")
 			{
 				try
 				{
@@ -72,41 +74,49 @@ namespace Amnesia
 					scopeThread = null;
 				}
 			}
+			else if (ctx.Request.QueryString["cmd"] == "abort")
+			{
+				Handler.TransactionScope.Dispose();
+				silent = true;
+			}
 
-			// Output UI based on new state
-			ctx.Response.Write(@"
+			if (!silent)
+			{
+				// Output UI based on new state
+				ctx.Response.Write(@"
 					<html>
 					<body>");
 
-			if(!Session.IsActive)
-				ctx.Response.Write(@"<a href='?start'>Start Session</a>");
-			else
-				ctx.Response.Write(string.Format(@"SESSION ACTIVE -- <a href='?end'>End Session</a>"));
+				if (!Session.IsActive)
+					ctx.Response.Write(@"<a href='?cmd=start'>Start Session</a>");
+				else
+					ctx.Response.Write(string.Format(@"SESSION ACTIVE -- <a href='?cmd=end'>End Session</a>"));
 
-			ctx.Response.Write(@"<br /><br /><a href='?status'>Refresh Status</a>");
+				ctx.Response.Write(@"<br /><br /><a href='?cmd=status'>Refresh Status</a>");
 
 
-			ctx.Response.Write(@"<br /><br /><h2>Thread Pool</h2><ol>");
-			object mutex = new object();
-			ThreadUtil.ForAllThreads(delegate
-			{
-				lock (mutex)
+				ctx.Response.Write(@"<br /><br /><h2>Thread Pool</h2><ol>");
+				object mutex = new object();
+				ThreadUtil.ForAllThreads(false, delegate
 				{
-					string transaction;
+					lock (mutex)
+					{
+						string transaction;
 
-					if(Transaction.Current == null)
-						transaction = "--";
-					else
-						transaction = Transaction.Current.TransactionInformation.DistributedIdentifier.ToString();
+						if (Transaction.Current == null)
+							transaction = "--";
+						else
+							transaction = Transaction.Current.TransactionInformation.DistributedIdentifier.ToString();
 
-					ctx.Response.Write(string.Format(@"<li>[thread {0}] Transaction: {1}", Thread.CurrentThread.ManagedThreadId, transaction));
-				}
-			});
+						ctx.Response.Write(string.Format(@"<li>[thread {0}] Transaction: {1}", Thread.CurrentThread.ManagedThreadId, transaction));
+					}
+				});
 
-			ctx.Response.Write(@"
+				ctx.Response.Write(@"
 				</ul>
 				</body>
 				</html>");
+			}
 		}
 	}
 }

@@ -20,6 +20,8 @@ namespace Amnesia
 		[ThreadStatic]
 		static internal TransactionScope TransactionScope;
 
+		static private bool rollbackStarted;
+
 		public bool IsReusable
 		{
 			get { return true; }
@@ -45,8 +47,26 @@ namespace Amnesia
 			}
 			catch (Exception error)
 			{
-				var errorResponse = new ErrorResponse(){Message = error.Message, ExceptionType= error.GetType().FullName, StackTrace=error.StackTrace};
+				var errorResponse = new ErrorResponse() { Message = error.Message, ExceptionType = error.GetType().FullName, StackTrace = error.StackTrace };
 				ctx.Response.Write(SerializationUtil.SerializeBase64(errorResponse));
+			}
+		}
+
+		static void Rollback(bool async)
+		{
+			if (!rollbackStarted)
+			{
+				rollbackStarted = true;
+				ThreadUtil.StopThreadPoolKeepAlive();
+
+				ThreadUtil.ForAllThreads(async, delegate
+				{
+					if (TransactionScope != null)
+					{
+						TransactionScope.Dispose();
+						TransactionScope = null;
+					}
+				});
 			}
 		}
 
@@ -75,30 +95,28 @@ namespace Amnesia
 
 			internal override StartSessionResponse Execute()
 			{
-				// End prior session if needed
 				if (Session.IsActive)
 					(new EndSessionRequest()).Execute();
-
 
 				// Propagate the transaction to all threads in the thread pool.
 				// Must to the proactively rather than in a module to to thread switches
 				// that may occur during I/O operations.
-
 				ThreadUtil.StartThreadPoolKeepAlive();
 
-				ThreadUtil.ForAllThreads(delegate
+				ThreadUtil.ForAllThreads(false, delegate
 				{
-					// TODO: need to synchronize access to transaction?
 					TransactionScope = new TransactionScope(Transaction.DependentClone(DependentCloneOption.RollbackIfNotComplete));
 				});
 
 				Session.IsActive = true;
-
+				rollbackStarted = false;
 
 				// Watch for when transaction ends unexpectedly so some cleanup can occur
-				Transaction.TransactionCompleted += delegate
-				{
-					(new EndSessionRequest()).Execute();
+				Transaction.TransactionCompleted += delegate {
+					// The rollback on the other threads depend on this one returning from
+					// this event handler so must do the rollback asynchronously, otherwise
+					// there will be a deadlock.
+					Rollback(true);
 				};
 
 				return new StartSessionResponse();
@@ -113,7 +131,8 @@ namespace Amnesia
 
 		#region EndSession
 		/// <summary>
-		/// Request that can be sent to the handler to end an active session
+		/// Request that can be sent to the handler to end an active session.
+		/// No need to explicitly end the session if a transaction is rolled back due to a failure
 		/// </summary>
 		[Serializable]
 		internal class EndSessionRequest : Command<EndSessionResponse>
@@ -125,13 +144,9 @@ namespace Amnesia
 					Session.IsActive = false;
 
 					// End the transaction for all threads
-					ThreadUtil.ForAllThreads(delegate
-					{
-						TransactionScope.Dispose();
-						TransactionScope = null;
-					});
-
-					ThreadUtil.StopThreadPoolKeepAlive();
+					// Wait for all threads to rollback before proceeding so
+					// everything is tidy when the request is completed.
+					Rollback(false);
 
 					// Raise event to notify application session has completed
 					Session.RaiseAfterSessionEnded();
