@@ -22,7 +22,7 @@ namespace Amnesia
 
 		public static void ProcessRequest(HttpContext ctx)
 		{
-			bool silent = string.IsNullOrEmpty(ctx.Request.QueryString["silent"]);
+			bool silent = !string.IsNullOrEmpty(ctx.Request.QueryString["silent"]);
 
 			if (ctx.Request.QueryString["cmd"] == "start")
 			{
