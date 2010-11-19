@@ -115,7 +115,7 @@ namespace Amnesia
 					Log = log
 				};
 
-				NameThread("leader");
+				//NameThread("leader");
 				Debug.WriteLine(string.Format("[thread {0}/{3}] workersThreads: {1}, ioThreads: {2}", Thread.CurrentThread.ManagedThreadId, workerThreads, ioThreads, Thread.CurrentThread.Name));
 
 				// make the pending actions visible to other thread pool threads trying to get our mutex
@@ -128,7 +128,7 @@ namespace Amnesia
 
 				for (int i = 0; i < workerThreads; ++i)
 					ThreadPool.QueueUserWorkItem(delegate {
-						NameThread("worker");
+						//NameThread("worker");
 						DoPendingAction(pendingSafe); 
 					});
 
@@ -142,7 +142,7 @@ namespace Amnesia
 						{
 							try
 							{
-								NameThread("io");
+								//NameThread("io");
 								DoPendingAction(pendingSafe);
 							}
 							finally
@@ -179,10 +179,10 @@ namespace Amnesia
 			}
 		}
 
-		private static void NameThread(string name)
-		{
-			Thread.CurrentThread.Name = Thread.CurrentThread.ManagedThreadId + "-" + name;
-		}
+		//private static void NameThread(string name)
+		//{
+		//    Thread.CurrentThread.Name = Thread.CurrentThread.ManagedThreadId + "-" + name;
+		//}
 
 		static bool DoPendingAction(PropagationInfo pendingSafe)
 		{
