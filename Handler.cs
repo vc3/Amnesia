@@ -63,10 +63,16 @@ namespace Amnesia
 				{
 					if (TransactionScope != null)
 					{
-						TransactionScope.Dispose();
-						TransactionScope = null;
+						try
+						{
+							TransactionScope.Dispose();
+						}
+						finally
+						{
+							TransactionScope = null;
+						}
 					}
-				});
+				}, "rollback, async=" + async);
 			}
 		}
 
@@ -106,7 +112,7 @@ namespace Amnesia
 				ThreadUtil.ForAllThreads(false, delegate
 				{
 					TransactionScope = new TransactionScope(Transaction.DependentClone(DependentCloneOption.RollbackIfNotComplete));
-				});
+				}, "start transaction");
 
 				Session.IsActive = true;
 				rollbackStarted = false;

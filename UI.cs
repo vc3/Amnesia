@@ -107,10 +107,11 @@ namespace Amnesia
 							transaction = "--";
 						else
 							transaction = Transaction.Current.TransactionInformation.DistributedIdentifier.ToString();
+						var t = Thread.CurrentThread;
 
-						ctx.Response.Write(string.Format(@"<li>[thread {0}] Transaction: {1}", Thread.CurrentThread.ManagedThreadId, transaction));
+						ctx.Response.Write(string.Format(@"<li>[thread {0}] Transaction: {1}, pooled={2}", t.Name, transaction, t.IsThreadPoolThread));
 					}
-				});
+				}, "stats");
 
 				ctx.Response.Write(@"
 				</ul>
