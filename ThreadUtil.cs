@@ -182,7 +182,7 @@ namespace Amnesia
 
 				// The current thread. This will block this thread until
 				// all other threads in the pool have performed the action too.
-				if (!DoPendingAction(pendingSafe))
+				if (!DoPendingAction(pendingSafe) && pendingSafe.Async)
 				{
 					// Action could not be performed due to a timeout. Requeue the call on a
 					// new thread and try again later. This should only occur when async=true.
