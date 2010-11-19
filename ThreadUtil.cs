@@ -23,6 +23,7 @@ namespace Amnesia
 			public bool Async;
 			public bool Timedout;
 			public string Log;
+			public int AccessTimeoutMs;
 		}
 
 		/// <summary>
@@ -40,7 +41,7 @@ namespace Amnesia
 					Thread.Sleep(1000);
 					while (keepAliveThread != null)
 					{
-						ForAllThreads(false, () => { }, "keep alive");
+						ForAllThreads(false, () => { }, "keep alive", 2000);
 						Thread.Sleep(1000);
 					}
 				});
@@ -60,7 +61,30 @@ namespace Amnesia
 			keepAliveThread.Abort();
 			keepAliveThread = null;
 		}
+
+		/// <summary>
+		/// Performs an action on every thread in the thread pool.
+		/// </summary>
+		/// <param name="async">true = wait for threads then run action, false=run action then wait for other threads</param>
+		/// <param name="action">action to perform on all threads</param>
+		/// <param name="log">Message for debugging</param>
+		/// <param name="poolAccessTimeoutMs">Time to wait before aborting to prevent deadlocks if greater than zero.  If specified,
+		/// action might be performed multiple times on the same thread or not at all. Used only for async=false.</param>
 		public static void ForAllThreads(bool async, Action action, string log)
+		{
+			ForAllThreads(async, action, log, 0);
+		}
+
+
+		/// <summary>
+		/// Performs an action on every thread in the thread pool.
+		/// </summary>
+		/// <param name="async">true = wait for threads then run action, false=run action then wait for other threads</param>
+		/// <param name="action">action to perform on all threads</param>
+		/// <param name="log">Message for debugging</param>
+		/// <param name="poolAccessTimeoutMs">Time to wait before aborting to prevent deadlocks if greater than zero.  If specified,
+		/// action might be performed multiple times on the same thread or not at all. Used only for async=false.</param>
+		static void ForAllThreads(bool async, Action action, string log, int poolAccessTimeoutMs)
 		{
 			List<PropagationInfo> completed = null;
 
@@ -112,7 +136,8 @@ namespace Amnesia
 					Action = action,
 					AllDone = new ManualResetEvent(false),
 					Async = async,
-					Log = log
+					Log = log,
+					AccessTimeoutMs = poolAccessTimeoutMs
 				};
 
 				//NameThread("leader");
@@ -243,7 +268,12 @@ namespace Amnesia
 					else
 					{
 						Debug.WriteLine(string.Format("[thread {0}] {1}  ->AllDone.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
-						pendingSafe.AllDone.WaitOne();
+
+						if (pendingSafe.AccessTimeoutMs <= 0)
+							pendingSafe.AllDone.WaitOne();
+						else if (!pendingSafe.AllDone.WaitOne(pendingSafe.AccessTimeoutMs))
+							return false;
+
 						Debug.WriteLine(string.Format("[thread {0}] {1}  <-AllDone.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
 					}
 				}
