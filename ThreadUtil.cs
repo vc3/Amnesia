@@ -8,8 +8,21 @@ using System.Diagnostics;
 
 namespace Amnesia
 {
+	/// <summary>
+	/// Utility class for dealing with the .NET ThreadPool.
+	/// </summary>
 	static class ThreadUtil
 	{
+		/// <summary>
+		/// ThreadPool threads will be held to this number of threads
+		/// </summary>
+		const int WORKER_THREADS = 10;
+
+		/// <summary>
+		/// ThreadPool IO threads will be held to this number of threads
+		/// </summary>
+		const int IO_THREADS = 10;
+
 		static bool reducedThreads;
 		static object mutext = new object();
 		static Thread keepAliveThread;
@@ -115,10 +128,18 @@ namespace Amnesia
 			}
 			try
 			{
-				// Reduce the number of threads in the pool so transaction propagates faster
 				if (!reducedThreads)
 				{
-					ThreadPool.SetMaxThreads(10, 10);
+					// Reduce the number of threads in the pool so transaction propagates faster
+					ThreadPool.SetMaxThreads(WORKER_THREADS, IO_THREADS);
+
+					// Prevent threads from being killed.  Under .NET 3.5 This must be done in conjunction with
+					// the keep alive thread to periodically use the threads in the pool.  If minimum isn't set threads
+					// are ended unexpectedly and when keep alive stops, the threads are killed when observed through
+					// the debugger.
+					// TODO: Verify this works under .NET 4
+					ThreadPool.SetMinThreads(WORKER_THREADS, IO_THREADS);
+
 					reducedThreads = true;
 				}
 
@@ -140,7 +161,7 @@ namespace Amnesia
 					AccessTimeoutMs = poolAccessTimeoutMs
 				};
 
-				//NameThread("leader");
+				NameThread("worker");
 				Debug.WriteLine(string.Format("[thread {0}/{3}] workersThreads: {1}, ioThreads: {2}", Thread.CurrentThread.ManagedThreadId, workerThreads, ioThreads, Thread.CurrentThread.Name));
 
 				// make the pending actions visible to other thread pool threads trying to get our mutex
@@ -153,7 +174,7 @@ namespace Amnesia
 
 				for (int i = 0; i < workerThreads; ++i)
 					ThreadPool.QueueUserWorkItem(delegate {
-						//NameThread("worker");
+						NameThread("worker");
 						DoPendingAction(pendingSafe); 
 					});
 
@@ -167,7 +188,7 @@ namespace Amnesia
 						{
 							try
 							{
-								//NameThread("io");
+								NameThread("io");
 								DoPendingAction(pendingSafe);
 							}
 							finally
@@ -204,10 +225,13 @@ namespace Amnesia
 			}
 		}
 
-		//private static void NameThread(string name)
-		//{
-		//    Thread.CurrentThread.Name = Thread.CurrentThread.ManagedThreadId + "-" + name;
-		//}
+		private static void NameThread(string name)
+		{
+#if DEBUG
+			if (string.IsNullOrEmpty(Thread.CurrentThread.Name))
+				Thread.CurrentThread.Name = name + "_" + Thread.CurrentThread.ManagedThreadId;
+#endif
+		}
 
 		static bool DoPendingAction(PropagationInfo pendingSafe)
 		{
