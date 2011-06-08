@@ -17,6 +17,7 @@ namespace Amnesia
 		EventHandler onAbortedAsync;
 		bool wasAbortedAsync = false;
 		private bool isDisposed;
+		EventHandler onDisposed;
 
 		#region AbortNotification
 		class AbortNotification : IEnlistmentNotification
@@ -137,6 +138,15 @@ namespace Amnesia
 				afterSessionEnded(null, EventArgs.Empty);
 		}
 
+		/// <summary>
+		/// Raised after the session is disposed
+		/// </summary>
+		public event EventHandler Disposed
+		{
+			add { onDisposed += value; }
+			remove { onDisposed -= value; }
+		}
+
 		public void Dispose()
 		{
 			isDisposed = true;
@@ -151,6 +161,10 @@ namespace Amnesia
 			// Now that server is aware, tear down the local transaction scope.
 			Transaction.Current.Rollback();
 			TxScope.Dispose();
+
+			// raise Disposed event
+			if (onDisposed != null)
+				onDisposed(this, EventArgs.Empty);
 		}
 
 	}
