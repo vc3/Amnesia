@@ -58,7 +58,6 @@ namespace Amnesia
 			{
 				rollbackStarted = true;
 				ThreadUtil.StopThreadPoolKeepAlive();
-				ThreadUtil.ForAllThreads(false, () => { }, "Wait for all threads to complete before disposing of transactions");
 
 				ThreadUtil.ForAllThreads(async, delegate
 				{
