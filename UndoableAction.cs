@@ -12,6 +12,7 @@ namespace Amnesia
 	internal class UndoableAction : IDisposable
 	{
 		Action undo;
+		Action<string, object[]> log;
 
 		public UndoableAction(Action undo)
 		{
@@ -22,6 +23,7 @@ namespace Amnesia
 		{
 			if (undo != null)
 			{
+
 				undo();
 				undo = null;
 			}

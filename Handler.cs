@@ -6,6 +6,7 @@ using System.Web.Configuration;
 using System.Threading;
 using System.Collections;
 using System.Text;
+using System.Collections.Generic;
 
 namespace Amnesia
 {
@@ -64,6 +65,8 @@ namespace Amnesia
 		/// </summary>
 		static void Rollback()
 		{
+			Session.ID = Guid.Empty;
+
 			ThreadUtil.StopThreadPoolKeepAlive();
 
 			// Dispose of transaction object on all threads
@@ -84,6 +87,19 @@ namespace Amnesia
 
 			Session.IsActive = false;
 		}
+
+		#region Response
+		[Serializable]
+		public class Response
+		{
+			internal SerializableLog Log { get; private set; }
+
+			protected Response()
+			{
+				Log = new SerializableLog();
+			}
+		}
+		#endregion
 
 		#region ErrorResponse
 		[Serializable]
@@ -108,16 +124,22 @@ namespace Amnesia
 			/// </summary>
 			public Transaction Transaction;
 
-			internal override StartSessionResponse Execute()
+			Guid sessionId;
+
+			internal override void Execute()
 			{
 				// Wait for all currently executing ASP requests to complete so we're in a clean state
 				// before messing around with the thread pool and transactions.  Being extra careful here
 				// should also prevent bleed over from any prior sessions into this one.
-				using (Module.LockWebServer(WebServerLockTimeoutMS))
+				using (Module.LockWebServer(WebServerLockTimeoutMS, Response.Log))
 				{
 					// If there is currently an open session, end it before starting a new one
 					if (Session.IsActive)
+					{
+						Response.Log.Write("Ending prior session...");
 						EndSessionRequest.EndSession();
+						Response.Log.Write("> prior session ended");
+					}
 
 					lastServerRollbackStackTrace = null;
 
@@ -131,32 +153,48 @@ namespace Amnesia
 					// Must do this proactively rather than in a module to to thread switches
 					// that may occur during I/O operations.
 					Session.IsActive = true;
-
+					sessionId = Session.ID = Guid.NewGuid();
+					
 					ThreadUtil.StartThreadPoolKeepAlive();
 
+					Response.Log.Write("Starting new session. Propagating transaction to thread pool.");
 					ThreadUtil.ForAllThreads(delegate
 					{
 						TransactionScope = new TransactionScope(Transaction.DependentClone(DependentCloneOption.RollbackIfNotComplete));
 					}, "start transaction");
-
-					return new StartSessionResponse();
+					Response.Log.Write("> session started");
 				}
 			}
 
 			void Transaction_TransactionCompleted(object sender, TransactionEventArgs e)
 			{
+				// Only attempt a rollback if the session is still active
+				if (!Session.IsActive || sessionId != Session.ID)
+					return;
+
+				Response.Log.Write("Transaction aborted unexpectedly by server!  An async rollback will begin momentarily.");
+
 				// Queue the rollback operation on a different, non-thread pool thread
 				// so that all the web server can be paused before cleaning up.
 				Thread rollbackThread = new Thread(delegate()
 				{
-					if (Session.IsActive)
-						using (Module.LockWebServer(WebServerLockTimeoutMS))
-						{
-							lastServerRollbackStackTrace = GetFullStackTrace();
+					Response.Log.Write("Async rollback thread is now running");
+					using (Module.LockWebServer(WebServerLockTimeoutMS, Response.Log))
+					{
+						lastServerRollbackStackTrace = GetFullStackTrace();
 
-							if (Session.IsActive)
-								Rollback();
+						// Verify the session is still active. It may have been ended before the rollback thread was able to
+						// obtain a lock.  Be sure to only end a session that was started by this particular request (via sessionId).
+						if (Session.IsActive && Session.ID == sessionId)
+						{
+							Response.Log.Write("Rolling back active session");
+							Rollback();
+							Response.Log.Write("> rollback completed");
 						}
+						else
+							Response.Log.Write("There is no active session to rollback");
+					}
+					Response.Log.Write("> Async rollback thread is exiting");
 				});
 
 				rollbackThread.Start();
@@ -189,7 +227,7 @@ namespace Amnesia
 		}
 
 		[Serializable]
-		internal class StartSessionResponse
+		internal class StartSessionResponse : Response
 		{
 		}
 		#endregion
@@ -202,15 +240,21 @@ namespace Amnesia
 		[Serializable]
 		internal class EndSessionRequest : Command<EndSessionResponse>
 		{
-			internal override EndSessionResponse Execute()
+			internal override void Execute()
 			{
-				using (Module.LockWebServer(WebServerLockTimeoutMS))
+				using (Module.LockWebServer(WebServerLockTimeoutMS, Response.Log))
 				{
 					if (Session.IsActive)
+					{
+						Response.Log.Write("Ending the active session");
 						EndSession();
+						Response.Log.Write("Session has been ended");
+					}
+					else
+					{
+						Response.Log.Write("There is no active session to end");
+					}
 				}
-
-				return new EndSessionResponse();
 			}
 
 			/// <summary>
@@ -229,7 +273,7 @@ namespace Amnesia
 		}
 
 		[Serializable]
-		internal class EndSessionResponse
+		internal class EndSessionResponse : Response
 		{
 		}
 		#endregion
@@ -241,12 +285,9 @@ namespace Amnesia
 		[Serializable]
 		internal class GetStatusRequest : Command<GetStatusResponse>
 		{
-			internal override GetStatusResponse Execute()
+			internal override void Execute()
 			{
-				return new GetStatusResponse()
-				{
-					LastServerRollbackStackTrace = Handler.lastServerRollbackStackTrace
-				};
+				Response.LastServerRollbackStackTrace = Handler.lastServerRollbackStackTrace;
 			}
 
 			/// <summary>
@@ -265,7 +306,7 @@ namespace Amnesia
 		}
 
 		[Serializable]
-		internal class GetStatusResponse
+		internal class GetStatusResponse : Response
 		{
 			public string LastServerRollbackStackTrace;
 		}

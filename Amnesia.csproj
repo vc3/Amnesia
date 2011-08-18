@@ -50,7 +50,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Command.cs" />
+    <Compile Include="ILog.cs" />
+    <Compile Include="LogAdapter.cs" />
     <Compile Include="Module.cs" />
+    <Compile Include="NullLog.cs" />
+    <Compile Include="SerializableLog.cs" />
     <Compile Include="SerializationUtil.cs" />
     <Compile Include="Handler.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

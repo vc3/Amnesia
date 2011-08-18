@@ -76,11 +76,19 @@ namespace Amnesia
 		/// this method returns, all requests (execpt for the current Amnesia one) will have
 		/// completed and any future requests will be denied.
 		/// </summary>
-		internal static IDisposable LockWebServer(int timeoutMS)
+		internal static IDisposable LockWebServer(int timeoutMS, ILog log)
 		{
-			PauseRequests(timeoutMS);
+			log = log ?? NullLog.Instance;
 
-			return new UndoableAction(ResumeRequests);
+			log.Write("Acquiring web server lock...");
+			PauseRequests(timeoutMS);
+			log.Write("> Lock acquired");
+
+			return new UndoableAction(delegate {
+				log.Write("Releasing web server lock...");
+				ResumeRequests();
+				log.Write("> Lock released");
+			});
 		}
 
 		/// <summary>

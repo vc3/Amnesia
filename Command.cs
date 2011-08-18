@@ -15,8 +15,22 @@ namespace Amnesia
 
 	[Serializable]
 	abstract internal class Command<TResponse> : ICommand
+		where TResponse: Handler.Response, new()
 	{
-		internal abstract TResponse Execute();
+		TResponse response;
+
+		internal abstract void Execute();
+
+		internal TResponse Response
+		{
+			get
+			{
+				if (response == null)
+					response = new TResponse();
+
+				return response;
+			}
+		}
 
 		public TResponse Send(string serviceUrl)
 		{
@@ -73,7 +87,8 @@ namespace Amnesia
 
 		object ICommand.Execute()
 		{
-			return this.Execute();
+			this.Execute();
+			return Response;
 		}
 	}
 }

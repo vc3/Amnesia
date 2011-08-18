@@ -18,6 +18,7 @@ namespace Amnesia
 		bool wasAbortedAsync = false;
 		private bool isDisposed;
 		EventHandler onDisposed;
+		ILog log;
 
 		#region AbortNotification
 		class AbortNotification : IEnlistmentNotification
@@ -55,16 +56,18 @@ namespace Amnesia
 		/// <summary>
 		/// Starts a new Amnesia session with a remote application
 		/// </summary>
-		public Session(Uri appUrl)
-			: this(appUrl.ToString())
+		public Session(Uri appUrl, ILog log)
+			: this(appUrl.ToString(), log)
 		{
 		}
 
 		/// <summary>
 		/// Starts a new Amnesia session with a remote application
 		/// </summary>
-		public Session(string appUrl)
+		public Session(string appUrl, ILog log)
 		{
+			this.log = log ?? NullLog.Instance;
+
 			this.serviceUrl = appUrl + Amnesia.Settings.Current.HandlerPath;
 
 			// Start a new distributed transaction
@@ -74,6 +77,8 @@ namespace Amnesia
 			request.Transaction = tx;
 
 			var response = request.Send(serviceUrl);
+			LogResponse(response);
+
 			IsActive = true;
 
 			// Monitor the distributed transaction in order to detect if its aborted remotely.
@@ -91,6 +96,12 @@ namespace Amnesia
 				}
 			}),
 			EnlistmentOptions.None);
+		}
+
+		void LogResponse(Handler.Response response)
+		{
+			foreach (string entry in response.Log.Entries)
+				log.Write(entry);
 		}
 
 		/// <summary>
@@ -117,6 +128,11 @@ namespace Amnesia
 			get;
 			internal set;
 		}
+
+		/// <summary>
+		/// Uniquely identifies the current active session
+		/// </summary>
+		internal static Guid ID { get; set; }
 
 		/// <summary>
 		/// Raised just after a session is ended
@@ -173,7 +189,8 @@ namespace Amnesia
 			onAbortedAsync = null;
 
 			// Notify the server of the end of the session. This will rollback the transaction server-side.
-			(new Handler.EndSessionRequest()).Send(serviceUrl);
+			var response = (new Handler.EndSessionRequest()).Send(serviceUrl);
+			LogResponse(response);
 
 			// Now that server is aware, tear down the local transaction scope.
 			Transaction.Current.Rollback();
