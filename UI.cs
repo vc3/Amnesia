@@ -97,7 +97,7 @@ namespace Amnesia
 
 				ctx.Response.Write(@"<br /><br /><h2>Thread Pool</h2><ol>");
 				object mutex = new object();
-				ThreadUtil.ForAllThreads(false, delegate
+				ThreadUtil.ForAllThreads(delegate
 				{
 					lock (mutex)
 					{

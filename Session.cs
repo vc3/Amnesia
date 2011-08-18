@@ -85,11 +85,28 @@ namespace Amnesia
 				if (request.Transaction.TransactionInformation.Status == TransactionStatus.Aborted)
 				{
 					wasAbortedAsync = true;
+
 					if(onAbortedAsync != null)
 						onAbortedAsync(this, EventArgs.Empty);
 				}
 			}),
 			EnlistmentOptions.None);
+		}
+
+		/// <summary>
+		/// Gets the callstack at the time a server-origin rollback occured
+		/// </summary>
+		public string GetServerRollbackStackTrace()
+		{
+			try
+			{
+				var status = (new Handler.GetStatusRequest().Send(serviceUrl, new TimeSpan(0, 0, 20)));
+				return status.LastServerRollbackStackTrace;
+			}
+			catch
+			{
+				return null;
+			}
 		}
 
 		/// <summary>

@@ -33,7 +33,6 @@ namespace Amnesia
 			public int Remaining;
 			public Action Action;
 			public ManualResetEvent AllDone;
-			public bool Async;
 			public bool Timedout;
 			public string Log;
 			public int AccessTimeoutMs;
@@ -54,11 +53,11 @@ namespace Amnesia
 					Thread.Sleep(1000);
 					while (keepAliveThread != null)
 					{
-						ForAllThreads(false, () => { }, "keep alive", 2000);
+						ForAllThreads(() => { }, "keep alive", 2000);
 						Thread.Sleep(1000);
 					}
 				});
-
+				keepAliveThread.Name = "Amnesia thread pool keep alive";
 				keepAliveThread.Start();
 			}
 		}
@@ -78,26 +77,24 @@ namespace Amnesia
 		/// <summary>
 		/// Performs an action on every thread in the thread pool.
 		/// </summary>
-		/// <param name="async">true = wait for threads then run action, false=run action then wait for other threads</param>
 		/// <param name="action">action to perform on all threads</param>
 		/// <param name="log">Message for debugging</param>
 		/// <param name="poolAccessTimeoutMs">Time to wait before aborting to prevent deadlocks if greater than zero.  If specified,
 		/// action might be performed multiple times on the same thread or not at all. Used only for async=false.</param>
-		public static void ForAllThreads(bool async, Action action, string log)
+		public static void ForAllThreads(Action action, string log)
 		{
-			ForAllThreads(async, action, log, 0);
+			ForAllThreads(action, log, 0);
 		}
 
 
 		/// <summary>
 		/// Performs an action on every thread in the thread pool.
 		/// </summary>
-		/// <param name="async">true = wait for threads then run action, false=run action then wait for other threads</param>
 		/// <param name="action">action to perform on all threads</param>
 		/// <param name="log">Message for debugging</param>
 		/// <param name="poolAccessTimeoutMs">Time to wait before aborting to prevent deadlocks if greater than zero.  If specified,
 		/// action might be performed multiple times on the same thread or not at all. Used only for async=false.</param>
-		static void ForAllThreads(bool async, Action action, string log, int poolAccessTimeoutMs)
+		static void ForAllThreads(Action action, string log, int poolAccessTimeoutMs)
 		{
 			List<PropagationInfo> completed = null;
 
@@ -156,7 +153,6 @@ namespace Amnesia
 					Remaining = workerThreads + ioThreads, 
 					Action = action,
 					AllDone = new ManualResetEvent(false),
-					Async = async,
 					Log = log,
 					AccessTimeoutMs = poolAccessTimeoutMs
 				};
@@ -203,21 +199,8 @@ namespace Amnesia
 
 				// The current thread. This will block this thread until
 				// all other threads in the pool have performed the action too.
-				if (!DoPendingAction(pendingSafe) && pendingSafe.Async)
-				{
-					// Action could not be performed due to a timeout. Requeue the call on a
-					// new thread and try again later. This should only occur when async=true.
-					// WARNING: This is somewhat risky in that actions might occur in an unexpected order.
-					Debug.WriteLine(string.Format("[thread {0}/{2}] {1}", Thread.CurrentThread.ManagedThreadId, "Queuing action for retry", Thread.CurrentThread.Name));
-					pending = null;
-					ThreadPool.QueueUserWorkItem(delegate {
-						ForAllThreads(async, action, log);
-					});
-				}
-				else
-				{
-					pending = null;
-				}
+				DoPendingAction(pendingSafe);
+				pending = null;
 			}
 			finally
 			{
@@ -240,12 +223,9 @@ namespace Amnesia
 			try
 			{
 				// action first, then block
-				if (!pendingSafe.Async)
-				{
-					Debug.WriteLine(string.Format("[thread {0}] {1} >>exec:sync", Thread.CurrentThread.Name, pendingSafe.Log));
-					try { pendingSafe.Action(); }
-					catch { }
-				}
+				Debug.WriteLine(string.Format("[thread {0}] {1} >>exec:sync", Thread.CurrentThread.Name, pendingSafe.Log));
+				try { pendingSafe.Action(); }
+				catch { }
 
 				bool isLastThread;
 
@@ -262,59 +242,19 @@ namespace Amnesia
 
 				if (!isLastThread)
 				{
-					if (pendingSafe.Async)
-					{
-						// if the task can be performed asynchrously then allow
-						// it to timeout to work around deadlocks.
-						Debug.WriteLine(string.Format("[thread {0}] {1}  ->AllDone.WaitOne(timeout)", Thread.CurrentThread.Name, pendingSafe.Log));
-						if (!pendingSafe.AllDone.WaitOne(2000))
-						{
-							Debug.WriteLine(string.Format("[thread {0}] {1}  timeout<-AllDone.WaitOne(timeout)", Thread.CurrentThread.Name, pendingSafe.Log));
-							// did the final thread
-							int remaining;
-							lock (pendingSafe)
-							{
-								remaining = pendingSafe.Remaining;
-								pendingSafe.Timedout = (remaining > 0);
-							}
+					Debug.WriteLine(string.Format("[thread {0}] {1}  ->AllDone.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
 
-							// Most likely, we're hung. However there's a chance that the final thread
-							// came through at the moment. If there are no remaining threads then keep on
-							// going and run the action.
-							if (remaining > 0)
-							{
-								Debug.WriteLine(string.Format("[thread {0}] {1} !!TIMEOUT!!", Thread.CurrentThread.Name, pendingSafe.Log));
-								return false;
-							}
-						}
-						Debug.WriteLine(string.Format("[thread {0}] {1}  signaled<-AllDone.WaitOne(timeout)", Thread.CurrentThread.Name, pendingSafe.Log));
-					}
-					else
-					{
-						Debug.WriteLine(string.Format("[thread {0}] {1}  ->AllDone.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
+					if (pendingSafe.AccessTimeoutMs <= 0)
+						pendingSafe.AllDone.WaitOne();
+					else if (!pendingSafe.AllDone.WaitOne(pendingSafe.AccessTimeoutMs))
+						return false;
 
-						if (pendingSafe.AccessTimeoutMs <= 0)
-							pendingSafe.AllDone.WaitOne();
-						else if (!pendingSafe.AllDone.WaitOne(pendingSafe.AccessTimeoutMs))
-							return false;
-
-						Debug.WriteLine(string.Format("[thread {0}] {1}  <-AllDone.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
-					}
+					Debug.WriteLine(string.Format("[thread {0}] {1}  <-AllDone.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
 				}
 				else
 				{
 					Debug.WriteLine(string.Format("[thread {0}] {1} =>AllDone.Set", Thread.CurrentThread.Name, pendingSafe.Log));
 					pendingSafe.AllDone.Set();
-				}
-
-				// when async == true, still wait for thread pool to become saturated before proceeding
-				// in order to ensure action is performed on all threads.
-				// also, perform the action AFTER waiting to prevent deadlocks.
-				if (pendingSafe.Async)
-				{
-					Debug.WriteLine(string.Format("[thread {0}] {1} >>exec:Async", Thread.CurrentThread.Name, pendingSafe.Log));
-					try { pendingSafe.Action(); }
-					catch { }
 				}
 
 				return true;

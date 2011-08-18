@@ -4,11 +4,15 @@ using System.IO;
 using System.Transactions;
 using System.Web.Configuration;
 using System.Threading;
+using System.Collections;
+using System.Text;
 
 namespace Amnesia
 {
 	public class Handler : IHttpHandler
 	{
+		const int WebServerLockTimeoutMS = 60000;
+
 		/// <summary>
 		/// the processing of a single request can change threads if
 		/// asynchronous I/O occurs during that request.  In order to guarantee
@@ -20,7 +24,10 @@ namespace Amnesia
 		[ThreadStatic]
 		static internal TransactionScope TransactionScope;
 
-		static private bool rollbackStarted;
+		/// <summary>
+		/// Stack trace of the last server-origin rollback
+		/// </summary>
+		static string lastServerRollbackStackTrace;
 
 		public bool IsReusable
 		{
@@ -52,28 +59,30 @@ namespace Amnesia
 			}
 		}
 
-		static void Rollback(bool async)
+		/// <summary>
+		/// Calls must handle concurrency control
+		/// </summary>
+		static void Rollback()
 		{
-			if (!rollbackStarted)
-			{
-				rollbackStarted = true;
-				ThreadUtil.StopThreadPoolKeepAlive();
+			ThreadUtil.StopThreadPoolKeepAlive();
 
-				ThreadUtil.ForAllThreads(async, delegate
+			// Dispose of transaction object on all threads
+			ThreadUtil.ForAllThreads(delegate
+			{
+				if (TransactionScope != null)
 				{
-					if (TransactionScope != null)
+					try
 					{
-						try
-						{
-							TransactionScope.Dispose();
-						}
-						finally
-						{
-							TransactionScope = null;
-						}
+						TransactionScope.Dispose();
 					}
-				}, "rollback, async=" + async);
-			}
+					finally
+					{
+						TransactionScope = null;
+					}
+				}
+			}, "rollback");
+
+			Session.IsActive = false;
 		}
 
 		#region ErrorResponse
@@ -101,31 +110,81 @@ namespace Amnesia
 
 			internal override StartSessionResponse Execute()
 			{
-				if (Session.IsActive)
-					(new EndSessionRequest()).Execute();
-
-				// Propagate the transaction to all threads in the thread pool.
-				// Must to the proactively rather than in a module to to thread switches
-				// that may occur during I/O operations.
-				ThreadUtil.StartThreadPoolKeepAlive();
-
-				ThreadUtil.ForAllThreads(false, delegate
+				// Wait for all currently executing ASP requests to complete so we're in a clean state
+				// before messing around with the thread pool and transactions.  Being extra careful here
+				// should also prevent bleed over from any prior sessions into this one.
+				using (Module.LockWebServer(WebServerLockTimeoutMS))
 				{
-					TransactionScope = new TransactionScope(Transaction.DependentClone(DependentCloneOption.RollbackIfNotComplete));
-				}, "start transaction");
+					// If there is currently an open session, end it before starting a new one
+					if (Session.IsActive)
+						EndSessionRequest.EndSession();
 
-				Session.IsActive = true;
-				rollbackStarted = false;
+					lastServerRollbackStackTrace = null;
 
-				// Watch for when transaction ends unexpectedly so some cleanup can occur
-				Transaction.TransactionCompleted += delegate {
-					// The rollback on the other threads depend on this one returning from
-					// this event handler so must do the rollback asynchronously, otherwise
-					// there will be a deadlock.
-					Rollback(true);
-				};
+					// Watch for when the transaction ends unexpectedly so some cleanup can occur.
+					// This event handler will run on the thread that is causing the rollback which is likely a
+					// different thread than is registering the event handler.
+					// Do this before flooding the thread pool so a failure while propogating the transaction is cleaned up.
+					Transaction.TransactionCompleted += Transaction_TransactionCompleted;
 
-				return new StartSessionResponse();
+					// Propagate the transaction to all threads in the thread pool.
+					// Must do this proactively rather than in a module to to thread switches
+					// that may occur during I/O operations.
+					Session.IsActive = true;
+
+					ThreadUtil.StartThreadPoolKeepAlive();
+
+					ThreadUtil.ForAllThreads(delegate
+					{
+						TransactionScope = new TransactionScope(Transaction.DependentClone(DependentCloneOption.RollbackIfNotComplete));
+					}, "start transaction");
+
+					return new StartSessionResponse();
+				}
+			}
+
+			void Transaction_TransactionCompleted(object sender, TransactionEventArgs e)
+			{
+				// Queue the rollback operation on a different, non-thread pool thread
+				// so that all the web server can be paused before cleaning up.
+				Thread rollbackThread = new Thread(delegate()
+				{
+					if (Session.IsActive)
+						using (Module.LockWebServer(WebServerLockTimeoutMS))
+						{
+							lastServerRollbackStackTrace = GetFullStackTrace();
+
+							if (Session.IsActive)
+								Rollback();
+						}
+				});
+
+				rollbackThread.Start();
+			}
+
+			/// <summary>
+			/// Utility method for getting the full stack trace for a list
+			/// of chained exceptions.
+			/// </summary>
+			/// <param name="error">Last exception in chain</param>
+			/// <returns>Stack trace</returns>
+			static string GetFullStackTrace()
+			{
+				Exception error = new Exception();
+
+				// Include exception info in the message
+				Stack errors = new Stack();
+				for (Exception e = error; null != e; e = e.InnerException)
+					errors.Push(e);
+
+				StringBuilder stackTrace = new StringBuilder();
+				while (errors.Count > 0)
+				{
+					Exception e = (Exception)errors.Pop();
+					stackTrace.AppendFormat("{0}\n {1}\n{2}\n\n", e.Message, e.GetType().FullName, e.StackTrace);
+				}
+
+				return stackTrace.ToString();
 			}
 		}
 
@@ -145,26 +204,70 @@ namespace Amnesia
 		{
 			internal override EndSessionResponse Execute()
 			{
-				if (Session.IsActive)
+				using (Module.LockWebServer(WebServerLockTimeoutMS))
 				{
-					Session.IsActive = false;
-
-					// End the transaction for all threads
-					// Wait for all threads to rollback before proceeding so
-					// everything is tidy when the request is completed.
-					Rollback(false);
-
-					// Raise event to notify application session has completed
-					Session.RaiseAfterSessionEnded();
+					if (Session.IsActive)
+						EndSession();
 				}
 
 				return new EndSessionResponse();
+			}
+
+			/// <summary>
+			/// Callers must handle concurrency control
+			/// </summary>
+			internal static void EndSession()
+			{
+				// End the transaction for all threads
+				// Wait for all threads to rollback before proceeding so
+				// everything is tidy when the request is completed.
+				Rollback();
+
+				// Raise event to notify application session has completed
+				Session.RaiseAfterSessionEnded();
 			}
 		}
 
 		[Serializable]
 		internal class EndSessionResponse
 		{
+		}
+		#endregion
+
+		#region GetStatus
+		/// <summary>
+		/// Gets status information about Amnesia
+		/// </summary>
+		[Serializable]
+		internal class GetStatusRequest : Command<GetStatusResponse>
+		{
+			internal override GetStatusResponse Execute()
+			{
+				return new GetStatusResponse()
+				{
+					LastServerRollbackStackTrace = Handler.lastServerRollbackStackTrace
+				};
+			}
+
+			/// <summary>
+			/// Callers must handle concurrency control
+			/// </summary>
+			internal static void EndSession()
+			{
+				// End the transaction for all threads
+				// Wait for all threads to rollback before proceeding so
+				// everything is tidy when the request is completed.
+				Rollback();
+
+				// Raise event to notify application session has completed
+				Session.RaiseAfterSessionEnded();
+			}
+		}
+
+		[Serializable]
+		internal class GetStatusResponse
+		{
+			public string LastServerRollbackStackTrace;
 		}
 		#endregion
 	}
