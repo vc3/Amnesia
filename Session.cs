@@ -57,6 +57,22 @@ namespace Amnesia
 		/// <summary>
 		/// Starts a new Amnesia session with a remote application
 		/// </summary>
+		public Session(Uri appUrl)
+			: this(appUrl, null)
+		{
+		}
+
+		/// <summary>
+		/// Starts a new Amnesia session with a remote application
+		/// </summary>
+		public Session(string appUrl)
+			: this(appUrl, null)
+		{
+		}
+
+		/// <summary>
+		/// Starts a new Amnesia session with a remote application
+		/// </summary>
 		public Session(Uri appUrl, ILog log)
 			: this(appUrl.ToString(), log)
 		{
