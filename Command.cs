@@ -5,12 +5,13 @@ using System.Text;
 using System.Net;
 using System.IO;
 using System.Threading;
+using System.Web;
 
 namespace Amnesia
 {
 	internal interface ICommand
 	{
-		object Execute();
+		IAsyncResult BeginExecute(HttpContext ctx, AsyncCallback callback);
 	}
 
 	[Serializable]
@@ -19,17 +20,35 @@ namespace Amnesia
 	{
 		TResponse response;
 
-		internal abstract void Execute();
+		public IAsyncResult BeginExecute(HttpContext ctx, AsyncCallback callback)
+		{
+			Response = new TResponse();
 
+			// Do work on a new thread. Do not use a threadpool thread to simplify saturating it.
+			Thread executeThread = new Thread(delegate()
+			{
+				Execute(ctx);
+				ctx.Response.Write(SerializationUtil.SerializeBase64(Response));
+				Response.Completed();
+				callback(Response);
+			});
+			executeThread.Start();
+
+			return Response;
+		}
+
+		/// <summary>
+		/// Override in each command subclass.
+		/// </summary>
+		internal abstract void Execute(HttpContext ctx);
+
+		/// <summary>
+		/// The response of the command
+		/// </summary>
 		internal TResponse Response
 		{
-			get
-			{
-				if (response == null)
-					response = new TResponse();
-
-				return response;
-			}
+			get;
+			private set;
 		}
 
 		public TResponse Send(string serviceUrl)
@@ -83,12 +102,6 @@ namespace Amnesia
 			}
 
 			return (TResponse)response;
-		}
-
-		object ICommand.Execute()
-		{
-			this.Execute();
-			return Response;
 		}
 	}
 }

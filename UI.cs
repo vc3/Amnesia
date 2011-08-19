@@ -26,53 +26,56 @@ namespace Amnesia
 
 			if (ctx.Request.QueryString["cmd"] == "start")
 			{
-				if (scopeThread != null)
-					throw new InvalidOperationException("Session is already started");
+				throw new NotImplementedException("todo: convert to use async handler");
+				//if (scopeThread != null)
+				//    throw new InvalidOperationException("Session is already started");
 
-				scopeThread = new Thread(arg =>
-				{
-					// create new scope
-					using (rootScope = new TransactionScope(TransactionScopeOption.Required, TimeSpan.Zero))
-					{
-						rootTransaction = Transaction.Current;
+				//scopeThread = new Thread(arg =>
+				//{
+				//    // create new scope
+				//    using (rootScope = new TransactionScope(TransactionScopeOption.Required, TimeSpan.Zero))
+				//    {
+				//        rootTransaction = Transaction.Current;
 
-						// notify request thread that scope is created
-						requestThreadProceed.Set();
+				//        // notify request thread that scope is created
+				//        requestThreadProceed.Set();
 
-						// wait for session to end
-						scopeThreadProceed.WaitOne();
-					}
+				//        // wait for session to end
+				//        scopeThreadProceed.WaitOne();
+				//    }
 
-					// return control to request thread
-					requestThreadProceed.Set();
-				});
+				//    // return control to request thread
+				//    requestThreadProceed.Set();
+				//});
 
 
-				// wait for the the helper thread create the root scope
-				scopeThreadProceed.Reset();
-				requestThreadProceed.Reset();
+				//// wait for the the helper thread create the root scope
+				//scopeThreadProceed.Reset();
+				//requestThreadProceed.Reset();
 				
-				scopeThread.Start();
+				//scopeThread.Start();
 
-				requestThreadProceed.WaitOne();
+				//requestThreadProceed.WaitOne();
 
-				// use the transaction created by the scopeThread
-				(new Handler.StartSessionRequest() { Transaction = rootTransaction }).Execute();
+				//// use the transaction created by the scopeThread
+				//Handler.StartSessionRequest() { Transaction = rootTransaction }).Execute();
 			}
 			else if (ctx.Request.QueryString["cmd"] == "end")
 			{
-				try
-				{
-					(new Handler.EndSessionRequest()).Execute();
-				}
-				finally
-				{
-					// notify the root thread that the scope can be released
-					requestThreadProceed.Reset();
-					scopeThreadProceed.Set();
-					requestThreadProceed.WaitOne();
-					scopeThread = null;
-				}
+				throw new NotImplementedException("todo: convert to use async handler");
+
+				//try
+				//{
+				//    (new Handler.EndSessionRequest()).Execute();
+				//}
+				//finally
+				//{
+				//    // notify the root thread that the scope can be released
+				//    requestThreadProceed.Reset();
+				//    scopeThreadProceed.Set();
+				//    requestThreadProceed.WaitOne();
+				//    scopeThread = null;
+				//}
 			}
 			else if (ctx.Request.QueryString["cmd"] == "abort")
 			{
@@ -94,27 +97,7 @@ namespace Amnesia
 
 				ctx.Response.Write(@"<br /><br /><a href='?cmd=status'>Refresh Status</a>");
 
-
-				ctx.Response.Write(@"<br /><br /><h2>Thread Pool</h2><ol>");
-				object mutex = new object();
-				ThreadUtil.ForAllThreads(delegate
-				{
-					lock (mutex)
-					{
-						string transaction;
-
-						if (Transaction.Current == null)
-							transaction = "--";
-						else
-							transaction = Transaction.Current.TransactionInformation.DistributedIdentifier.ToString();
-						var t = Thread.CurrentThread;
-
-						ctx.Response.Write(string.Format(@"<li>[thread {0}] Transaction: {1}, pooled={2}", t.Name, transaction, t.IsThreadPoolThread));
-					}
-				}, "stats");
-
 				ctx.Response.Write(@"
-				</ul>
 				</body>
 				</html>");
 			}

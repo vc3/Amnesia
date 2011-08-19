@@ -19,6 +19,7 @@ namespace Amnesia
 		private bool isDisposed;
 		EventHandler onDisposed;
 		ILog log;
+		static Guid id;
 
 		#region AbortNotification
 		class AbortNotification : IEnlistmentNotification
@@ -79,7 +80,7 @@ namespace Amnesia
 			var response = request.Send(serviceUrl);
 			LogResponse(response);
 
-			IsActive = true;
+			response.ReceivedByClient();
 
 			// Monitor the distributed transaction in order to detect if its aborted remotely.
 			tx.EnlistVolatile(new AbortNotification((o, e) =>
@@ -125,14 +126,26 @@ namespace Amnesia
 		/// </summary>
 		public static bool IsActive
 		{
-			get;
-			internal set;
+			get { return ID != Guid.Empty; }
 		}
 
 		/// <summary>
 		/// Uniquely identifies the current active session
 		/// </summary>
-		internal static Guid ID { get; set; }
+		internal static Guid ID
+		{
+			get
+			{ 
+				return id;
+			} 
+			set 
+			{
+				if (!(id == Guid.Empty || value == Guid.Empty))
+					throw new InvalidOperationException("Cannot start a new session until the current one has been ended. Active=" + id + ", New=" + value);
+
+				id = value;
+			}
+		}
 
 		/// <summary>
 		/// Raised just after a session is ended
@@ -183,7 +196,7 @@ namespace Amnesia
 		public void Dispose()
 		{
 			isDisposed = true;
-			IsActive = false;
+			Session.ID = Guid.Empty;
 
 			// transaction is completing due to local code so disable the AbortedAsync event
 			onAbortedAsync = null;

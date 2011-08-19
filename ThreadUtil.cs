@@ -26,16 +26,18 @@ namespace Amnesia
 		static bool reducedThreads;
 		static object mutext = new object();
 		static Thread keepAliveThread;
-		static PropagationInfo pending;
 
 		class PropagationInfo
 		{
-			public int Remaining;
-			public Action Action;
+			public int TotalThreads;
+			public int AcquiredThreads;
+			public ManualResetEvent AllAcquired;
+			public int DoneThreads;
 			public ManualResetEvent AllDone;
-			public bool Timedout;
+			public Action Action;
+			public bool Canceled;
 			public string Log;
-			public int AccessTimeoutMs;
+			public ManualResetEvent Cancel;
 		}
 
 		/// <summary>
@@ -74,56 +76,54 @@ namespace Amnesia
 			keepAliveThread = null;
 		}
 
-		/// <summary>
+				/// <summary>
 		/// Performs an action on every thread in the thread pool.
 		/// </summary>
 		/// <param name="action">action to perform on all threads</param>
 		/// <param name="log">Message for debugging</param>
-		/// <param name="poolAccessTimeoutMs">Time to wait before aborting to prevent deadlocks if greater than zero.  If specified,
+		/// <param name="threadAcquisitionTimeoutMS">Time to wait before aborting to prevent deadlocks if greater than zero.  If specified,
 		/// action might be performed multiple times on the same thread or not at all. Used only for async=false.</param>
 		public static void ForAllThreads(Action action, string log)
 		{
-			ForAllThreads(action, log, 0);
+			ForAllThreads(action, log, 2000, 15);
 		}
-
 
 		/// <summary>
 		/// Performs an action on every thread in the thread pool.
 		/// </summary>
 		/// <param name="action">action to perform on all threads</param>
 		/// <param name="log">Message for debugging</param>
-		/// <param name="poolAccessTimeoutMs">Time to wait before aborting to prevent deadlocks if greater than zero.  If specified,
+		/// <param name="threadAcquisitionTimeoutMS">Time to wait before aborting to prevent deadlocks if greater than zero.  If specified,
 		/// action might be performed multiple times on the same thread or not at all. Used only for async=false.</param>
-		static void ForAllThreads(Action action, string log, int poolAccessTimeoutMs)
+		public static void ForAllThreads(Action action, string log, int threadAcquisitionTimeoutMS, int maxRetries)
 		{
-			List<PropagationInfo> completed = null;
+			int retries = 0;
 
-			// must lock to prevent two threads from trying to saturate the thread pool at
-			// the same time and deadlocking
-			while (!Monitor.TryEnter(mutext, 100))
+			while (!ForAllThreads(action, log, threadAcquisitionTimeoutMS))
 			{
-				// If the lock cannot be acquired it might be because this
-				// thread is a thread from the ThreadPool and we might
-				// be in a deadlock sitation. To prevent deadlock, let this
-				// thread perform the pending action as well.
-				if (pending != null && Thread.CurrentThread.IsThreadPoolThread)
+				++retries;
+
+				if (retries == maxRetries)
 				{
-					if (completed == null)
-						completed = new List<PropagationInfo>();
-
-					if (!completed.Contains(pending))
-					{
-						// don't perform an action twice (due to race condition after DoPendingAction)
-						completed.Add(pending);
-
-						// Execute the pending action that another thread is waiting on this one to complete.
-						// This will block the current thread until the action has been executed by all
-						// other threads.
-						DoPendingAction(pending);
-					}
+					throw new TimeoutException("Cannot perform action '" + log + "', retries = " + maxRetries);
 				}
 			}
-			try
+		}
+
+		/// <summary>
+		/// Performs an action on every thread in the thread pool.
+		/// </summary>
+		/// <param name="action">action to perform on all threads</param>
+		/// <param name="log">Message for debugging</param>
+		/// <param name="threadAcquisitionTimeoutMS">Time to wait before aborting to prevent deadlocks if greater than zero.  If specified,
+		/// action might be performed multiple times on the same thread or not at all. Used only for async=false.</param>
+		/// <returns>False if the timeout occured</returns>
+		public static bool ForAllThreads(Action action, string log, int threadAcquisitionTimeoutMS)
+		{
+			if (Thread.CurrentThread.IsThreadPoolThread)
+				throw new InvalidOperationException("This method cannot be called from a thread pool thread");
+
+			lock(mutext)
 			{
 				if (!reducedThreads)
 				{
@@ -150,28 +150,25 @@ namespace Amnesia
 				// call ForAllThreads, it can go ahead and do this action too rather
 				// than deadlock.
 				var pendingSafe = new PropagationInfo() {
-					Remaining = workerThreads + ioThreads, 
-					Action = action,
+					TotalThreads = workerThreads + ioThreads,
+					AllAcquired = new ManualResetEvent(false),
 					AllDone = new ManualResetEvent(false),
-					Log = log,
-					AccessTimeoutMs = poolAccessTimeoutMs
+					Cancel = new ManualResetEvent(false),
+					Action = action,
+					Log = log
 				};
 
 				NameThread("worker");
 				Debug.WriteLine(string.Format("[thread {0}/{3}] workersThreads: {1}, ioThreads: {2}", Thread.CurrentThread.ManagedThreadId, workerThreads, ioThreads, Thread.CurrentThread.Name));
 
 				// make the pending actions visible to other thread pool threads trying to get our mutex
-				pending = pendingSafe;
-
+				
 				// saturate worker threads
-				// is the current thread already a worker?
-				if (Thread.CurrentThread.IsThreadPoolThread)
-					--workerThreads;
-
 				for (int i = 0; i < workerThreads; ++i)
-					ThreadPool.QueueUserWorkItem(delegate {
+					ThreadPool.QueueUserWorkItem(delegate
+					{
 						NameThread("worker");
-						DoPendingAction(pendingSafe); 
+						DoPendingAction(pendingSafe);
 					});
 
 				// saturate i/o threads
@@ -197,14 +194,26 @@ namespace Amnesia
 					}
 				}
 
-				// The current thread. This will block this thread until
-				// all other threads in the pool have performed the action too.
-				DoPendingAction(pendingSafe);
-				pending = null;
-			}
-			finally
-			{
-				Monitor.Exit(mutext);
+				// wait for all thread pool threads to perform the action.
+				if(!pendingSafe.AllAcquired.WaitOne(threadAcquisitionTimeoutMS))
+				{
+					// Timed out waiting for threads to be acquired. Must double check inside lock that not all threads have been acquired.
+					lock (pendingSafe)
+					{
+						if (pendingSafe.AcquiredThreads < pendingSafe.TotalThreads)
+						{
+							// Cancel the threads that are waiting for the acquisition to complete
+							pendingSafe.Canceled = true;
+							pendingSafe.Cancel.Set();
+							return false;
+						}
+					}
+				}
+
+				// All threads were acquired so wait for the action to complete.
+				pendingSafe.AllDone.WaitOne();
+
+				return true;
 			}
 		}
 
@@ -216,48 +225,73 @@ namespace Amnesia
 #endif
 		}
 
-		static bool DoPendingAction(PropagationInfo pendingSafe)
+		static void DoPendingAction(PropagationInfo pendingSafe)
 		{
 			Debug.WriteLine(string.Format("[thread {0}] ->{1}", Thread.CurrentThread.Name, pendingSafe.Log));
 
 			try
 			{
-				// action first, then block
-				Debug.WriteLine(string.Format("[thread {0}] {1} >>exec:sync", Thread.CurrentThread.Name, pendingSafe.Log));
-				try { pendingSafe.Action(); }
-				catch { }
-
 				bool isLastThread;
 
+				// Wait for all threads to be acquired before performing action so that retries can be implemented.
 				lock (pendingSafe)
 				{
-					// stop if we've timed out (async mode only)
-					if (pendingSafe.Timedout)
-						return false;
+					if (pendingSafe.Canceled)
+						return;
 
 					// update thread count
-					--pendingSafe.Remaining;
-					isLastThread = pendingSafe.Remaining == 0;
+					++pendingSafe.AcquiredThreads;
+
+					isLastThread = pendingSafe.TotalThreads == pendingSafe.AcquiredThreads;
 				}
 
-				if (!isLastThread)
+				if (isLastThread)
 				{
-					Debug.WriteLine(string.Format("[thread {0}] {1}  ->AllDone.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
-
-					if (pendingSafe.AccessTimeoutMs <= 0)
-						pendingSafe.AllDone.WaitOne();
-					else if (!pendingSafe.AllDone.WaitOne(pendingSafe.AccessTimeoutMs))
-						return false;
-
-					Debug.WriteLine(string.Format("[thread {0}] {1}  <-AllDone.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
+					// notify other threads that they can proceed
+					Debug.WriteLine(string.Format("[thread {0}] =>AllAcquired.Set", Thread.CurrentThread.Name, pendingSafe.Log));
+					pendingSafe.AllAcquired.Set();
 				}
 				else
 				{
+					// wait for the remaining threads to be acquired, or until cancelled
+					Debug.WriteLine(string.Format("[thread {0}] {1}  ->AllAcquired.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
+
+					if (WaitHandle.WaitAny(new WaitHandle[] { pendingSafe.Cancel, pendingSafe.AllAcquired }) == 0)
+					{
+						Debug.WriteLine(string.Format("[thread {0}] {1}  <= cancel", Thread.CurrentThread.Name, pendingSafe.Log));
+						return;
+					}
+
+					Debug.WriteLine(string.Format("[thread {0}] {1}  <-AllAcquired.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
+				}
+
+				// at this point, all threads in the pool have been acquired and the action can be performed
+
+				Debug.WriteLine(string.Format("[thread {0}] {1} >>exec", Thread.CurrentThread.Name, pendingSafe.Log));
+				try { pendingSafe.Action(); }
+				catch { }
+				Debug.WriteLine(string.Format("[thread {0}] {1} <<exec", Thread.CurrentThread.Name, pendingSafe.Log));
+
+				lock (pendingSafe)
+				{
+					// update thread count
+					++pendingSafe.DoneThreads;
+					isLastThread = pendingSafe.TotalThreads == pendingSafe.DoneThreads;
+				}
+
+				if (isLastThread)
+				{
+					// notify other threads that the action is completed
 					Debug.WriteLine(string.Format("[thread {0}] {1} =>AllDone.Set", Thread.CurrentThread.Name, pendingSafe.Log));
 					pendingSafe.AllDone.Set();
 				}
-
-				return true;
+				else
+				{
+					// wait for other threads to finish the action
+					Debug.WriteLine(string.Format("[thread {0}] {1}  ->AllDone.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
+					pendingSafe.AllDone.WaitOne();
+					Debug.WriteLine(string.Format("[thread {0}] {1}  <-AllDone.WaitOne", Thread.CurrentThread.Name, pendingSafe.Log));
+				}
 			}
 			finally
 			{

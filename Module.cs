@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Web;
 using System.Threading;
+using System.Transactions;
 
 namespace Amnesia
 {
@@ -32,6 +33,10 @@ namespace Amnesia
 
 		void context_BeginRequest(object sender, EventArgs e)
 		{
+			// Sanity check:
+			if (Session.IsActive && Transaction.Current == null)
+				throw new InvalidOperationException("Thread should be participating in the Amnesia session but is not.  Thread: " + Thread.CurrentThread.Name);
+
 			lock (fieldsLock)
 			{
 				// Track that a request has been started
@@ -76,12 +81,12 @@ namespace Amnesia
 		/// this method returns, all requests (execpt for the current Amnesia one) will have
 		/// completed and any future requests will be denied.
 		/// </summary>
-		internal static IDisposable LockWebServer(int timeoutMS, ILog log)
+		internal static IDisposable LockWebServer(int timeoutMS, bool inWebRequest, ILog log)
 		{
 			log = log ?? NullLog.Instance;
 
 			log.Write("Acquiring web server lock...");
-			PauseRequests(timeoutMS);
+			PauseRequests(timeoutMS, inWebRequest);
 			log.Write("> Lock acquired");
 
 			return new UndoableAction(delegate {
@@ -96,7 +101,7 @@ namespace Amnesia
 		/// this method returns, all requests (execpt for the current Amnesia one) will have
 		/// completed and any future requests will be denied.
 		/// </summary>
-		private static void PauseRequests(int timeoutMS)
+		private static void PauseRequests(int timeoutMS, bool inWebRequest)
 		{
 			if (!moduleRegistered)
 				throw new InvalidOperationException(@"Amnesia's HTTP Module must be registered. Here's some XML that may help: <add name=""Amnesia"" type=""Amnesia.Module, Amnesia"" />");
@@ -121,7 +126,7 @@ namespace Amnesia
 
 					// Take into account that the lock request may be occuring either from an ASP request or
 					// from another thread that is not an ASP request.
-					freeRequests = HttpContext.Current == null ? 0 : 1;
+					freeRequests = inWebRequest ? 1 : 0;
 
 					// Wait for any requests that are currently executing to complete
 					if (requestsExecuting > freeRequests)
