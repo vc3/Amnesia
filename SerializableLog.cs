@@ -15,7 +15,10 @@ namespace Amnesia
 
 		public void Write(string messageFormat, params object[] args)
 		{
-			entries.Add(string.Format("[{0}] ", (DateTime.Now - startTime)) + " " + string.Format(messageFormat, args));
+			var entry = string.Format("[{0}] ", (DateTime.Now - startTime)) + " " + string.Format(messageFormat, args);
+
+			lock(entries)
+				entries.Add(entry);
 		}
 
 		public IEnumerable<string> Entries

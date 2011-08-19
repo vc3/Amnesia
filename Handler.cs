@@ -79,7 +79,7 @@ namespace Amnesia
 		/// <summary>
 		/// Calls must handle concurrency control
 		/// </summary>
-		static void Rollback()
+		static void Rollback(ILog log)
 		{
 			ThreadUtil.StopThreadPoolKeepAlive();
 
@@ -91,6 +91,12 @@ namespace Amnesia
 					try
 					{
 						TransactionScope.Dispose();
+						log.Write("  Transaction started on thread " + Thread.CurrentThread.ManagedThreadId);
+					}
+					catch(Exception e)
+					{
+						log.Write("  Failed to rollback transaction on thread " + Thread.CurrentThread.ManagedThreadId + ": " + e.Message);
+						throw;
 					}
 					finally
 					{
@@ -189,7 +195,7 @@ namespace Amnesia
 					if (Session.IsActive)
 					{
 						Response.Log.Write("Ending prior session ({0})", Session.ID);
-						EndSessionRequest.EndSession();
+						EndSessionRequest.EndSession(Response.Log);
 						Response.Log.Write("> prior session ended");
 					}
 
@@ -212,6 +218,7 @@ namespace Amnesia
 					ThreadUtil.ForAllThreads(delegate
 					{
 						TransactionScope = new TransactionScope(Transaction.DependentClone(DependentCloneOption.RollbackIfNotComplete));
+						Response.Log.Write("  Transaction started on thread " + Thread.CurrentThread.ManagedThreadId);
 					}, "start transaction");
 					Response.Log.Write("> session started");
 				}
@@ -247,7 +254,7 @@ namespace Amnesia
 						if (Session.ID == sessionId)
 						{
 							Response.Log.Write("Rolling back session ({0})", Session.ID);
-							Rollback();
+							Rollback(Response.Log);
 							Response.Log.Write("> rollback completed");
 						}
 						else
@@ -313,7 +320,7 @@ namespace Amnesia
 					if (Session.IsActive)
 					{
 						Response.Log.Write("Ending the active session ({0})", Session.ID);
-						EndSession();
+						EndSession(Response.Log);
 						Response.Log.Write("Session has been ended");
 					}
 					else
@@ -332,12 +339,12 @@ namespace Amnesia
 			/// <summary>
 			/// Callers must handle concurrency control
 			/// </summary>
-			internal static void EndSession()
+			internal static void EndSession(ILog log)
 			{
 				// End the transaction for all threads
 				// Wait for all threads to rollback before proceeding so
 				// everything is tidy when the request is completed.
-				Rollback();
+				Rollback(log);
 
 				// Raise event to notify application session has completed
 				Session.RaiseAfterSessionEnded();

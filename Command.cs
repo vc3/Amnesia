@@ -63,7 +63,7 @@ namespace Amnesia
 			DateTime startTime = DateTime.Now;
 
 		RETRY:
-			HttpWebRequest http = (HttpWebRequest)WebRequest.Create(serviceUrl);
+			HttpWebRequest http = (HttpWebRequest)WebRequest.Create(serviceUrl + "?" + GetType().Name);
 			http.Method = "POST";
 			http.Timeout = 10 * 60 * 1000;
 

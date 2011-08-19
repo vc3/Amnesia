@@ -33,10 +33,6 @@ namespace Amnesia
 
 		void context_BeginRequest(object sender, EventArgs e)
 		{
-			// Sanity check:
-			if (Session.IsActive && Transaction.Current == null)
-				throw new InvalidOperationException("Thread should be participating in the Amnesia session but is not.  Thread: " + Thread.CurrentThread.Name);
-
 			lock (fieldsLock)
 			{
 				// Track that a request has been started
@@ -50,6 +46,9 @@ namespace Amnesia
 					HttpContext.Current.Response.End();
 					return;
 				}
+				// Sanity check. Ignore amnesia calls however in case an EndSession command is issue to clean up
+				else if (!InAmnesiaRequest && Session.IsActive && Transaction.Current == null)
+					throw new InvalidOperationException("Thread should be participating in the Amnesia session but is not. Session: " + Session.ID + ",  Thread: " + Thread.CurrentThread.Name);
 			}
 		}
 
@@ -165,6 +164,14 @@ namespace Amnesia
 
 				// release the lock
 				Monitor.Exit(pauseLock);
+			}
+		}
+
+		bool InAmnesiaRequest
+		{
+			get
+			{
+				return HttpContext.Current.Handler is Amnesia.Handler;
 			}
 		}
 	}
