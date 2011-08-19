@@ -48,7 +48,7 @@ namespace Amnesia
 				}
 				// Sanity check. Ignore amnesia calls however in case an EndSession command is issue to clean up
 				else if (!InAmnesiaRequest && Session.IsActive && Transaction.Current == null)
-					throw new InvalidOperationException("Thread should be participating in the Amnesia session but is not. Session: " + Session.ID + ",  Thread: " + Thread.CurrentThread.ManagedThreadId);
+					throw new InvalidOperationException("Thread should be participating in the Amnesia session but is not. Session: " + Session.ID + ",  Thread: " + Thread.CurrentThread.ManagedThreadId + " (" + Thread.CurrentThread.Name + ")");
 			}
 		}
 

@@ -95,7 +95,7 @@ namespace Amnesia
 					}
 					catch(Exception e)
 					{
-						log.Write("  Failed to rollback transaction on thread " + Thread.CurrentThread.ManagedThreadId + ": " + e.Message);
+						log.Write("  Failed to rollback transaction on thread " + Thread.CurrentThread.ManagedThreadId + " (" + Thread.CurrentThread.Name + ")" + ": " + e.Message);
 						throw;
 					}
 					finally
@@ -218,7 +218,7 @@ namespace Amnesia
 					ThreadUtil.ForAllThreads(delegate
 					{
 						TransactionScope = new TransactionScope(Transaction.DependentClone(DependentCloneOption.RollbackIfNotComplete));
-						Response.Log.Write("  Transaction started on thread " + Thread.CurrentThread.ManagedThreadId);
+						Response.Log.Write("  Transaction started on thread " + Thread.CurrentThread.ManagedThreadId + " (" + Thread.CurrentThread.Name + ")");
 					}, "start transaction");
 					Response.Log.Write("> session started");
 				}

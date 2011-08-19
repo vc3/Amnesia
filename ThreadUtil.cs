@@ -55,7 +55,14 @@ namespace Amnesia
 					Thread.Sleep(1000);
 					while (keepAliveThread != null)
 					{
-						ForAllThreads(() => { }, "keep alive", 2000);
+						try
+						{
+							ForAllThreads(() => { }, "keep alive", 2000);
+						}
+						catch
+						{
+							// ignore errors
+						}
 						Thread.Sleep(1000);
 					}
 				});
