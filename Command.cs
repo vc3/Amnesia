@@ -11,7 +11,7 @@ namespace Amnesia
 {
 	internal interface ICommand
 	{
-		IAsyncResult BeginExecute(HttpContext ctx, AsyncCallback callback);
+		Handler.Response Execute(HttpContext ctx);
 	}
 
 	[Serializable]
@@ -20,35 +20,23 @@ namespace Amnesia
 	{
 		TResponse response;
 
-		public IAsyncResult BeginExecute(HttpContext ctx, AsyncCallback callback)
-		{
-			Response = new TResponse();
-
-			// Do work on a new thread. Do not use a threadpool thread to simplify saturating it.
-			Thread executeThread = new Thread(delegate()
-			{
-				Execute(ctx);
-				ctx.Response.Write(SerializationUtil.SerializeBase64(Response));
-				Response.Completed();
-				callback(Response);
-			});
-			executeThread.Start();
-
-			return Response;
-		}
-
 		/// <summary>
 		/// Override in each command subclass.
 		/// </summary>
-		internal abstract void Execute(HttpContext ctx);
+		public abstract void Execute(HttpContext ctx);
 
 		/// <summary>
 		/// The response of the command
 		/// </summary>
 		internal TResponse Response
 		{
-			get;
-			private set;
+			get
+			{
+				if (response == null)
+					response = new TResponse(); 
+				
+				return response;
+			}
 		}
 
 		public TResponse Send(string serviceUrl)
@@ -102,6 +90,12 @@ namespace Amnesia
 			}
 
 			return (TResponse)response;
+		}
+
+		Handler.Response ICommand.Execute(HttpContext ctx)
+		{
+			this.Execute(ctx);
+			return this.Response;
 		}
 	}
 }

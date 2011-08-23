@@ -11,6 +11,8 @@ namespace Amnesia
 	/// </summary>
 	internal class UndoableAction : IDisposable
 	{
+		public static IDisposable Null = new UndoableAction(null);
+
 		Action undo;
 		Action<string, object[]> log;
 

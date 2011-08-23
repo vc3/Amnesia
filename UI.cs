@@ -26,7 +26,7 @@ namespace Amnesia
 
 			if (ctx.Request.QueryString["cmd"] == "start")
 			{
-				throw new NotImplementedException("todo: convert to use async handler");
+				throw new NotImplementedException("todo: reimplement");
 				//if (scopeThread != null)
 				//    throw new InvalidOperationException("Session is already started");
 
@@ -62,7 +62,7 @@ namespace Amnesia
 			}
 			else if (ctx.Request.QueryString["cmd"] == "end")
 			{
-				throw new NotImplementedException("todo: convert to use async handler");
+				throw new NotImplementedException("todo: reimplement");
 
 				//try
 				//{
@@ -79,8 +79,8 @@ namespace Amnesia
 			}
 			else if (ctx.Request.QueryString["cmd"] == "abort")
 			{
-				Handler.TransactionScope.Dispose();
-				silent = true;
+				//Handler.TransactionScope.Dispose();
+				//silent = true;
 			}
 
 			if (!silent)
@@ -93,8 +93,12 @@ namespace Amnesia
 				if (!Session.IsActive)
 					ctx.Response.Write(@"<a href='?cmd=start'>Start Session</a>");
 				else
-					ctx.Response.Write(string.Format(@"SESSION ACTIVE -- <a href='?cmd=end'>End Session</a>"));
-
+				{
+					ctx.Response.Write(string.Format(@"<a href='?cmd=end'>End Session</a><br/>"));
+					ctx.Response.Write(string.Format(@"ID: {0}</br>", Session.ID));
+					ctx.Response.Write(string.Format(@"Transaction: {0}</br>", Session.Transaction.TransactionInformation.Status));
+					ctx.Response.Write(string.Format(@"<a href='?cmd=end'>End Session</a><br/>"));
+				}
 				ctx.Response.Write(@"<br /><br /><a href='?cmd=status'>Refresh Status</a>");
 
 				ctx.Response.Write(@"

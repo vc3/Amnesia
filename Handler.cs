@@ -11,20 +11,9 @@ using System.Diagnostics;
 
 namespace Amnesia
 {
-	public class Handler : IHttpAsyncHandler
+	public class Handler : IHttpHandler
 	{
 		const int WebServerLockTimeoutMS = 60000;
-
-		/// <summary>
-		/// the processing of a single request can change threads if
-		/// asynchronous I/O occurs during that request.  In order to guarantee
-		/// all requests participate in the transaction the handler will propagate
-		/// the transaction to all threads in the thread pool.
-		/// 
-		/// The scope for each thread is tracked in this variable.
-		/// </summary>
-		[ThreadStatic]
-		static internal TransactionScope TransactionScope;
 
 		/// <summary>
 		/// Stack trace of the last server-origin rollback
@@ -32,14 +21,19 @@ namespace Amnesia
 		static string lastServerRollbackStackTrace;
 
 		#region IHttpAsyncHandler
-		IAsyncResult IHttpAsyncHandler.BeginProcessRequest(HttpContext ctx, AsyncCallback callback, object extraData)
+
+		bool IHttpHandler.IsReusable
+		{
+			get { return true; }
+		}
+
+		void IHttpHandler.ProcessRequest(HttpContext ctx)
 		{
 			try
 			{
 				if (ctx.Request.Url.GetComponents(UriComponents.Path, UriFormat.Unescaped).ToLower().EndsWith("/ui"))
 				{
 					UI.ProcessRequest(ctx);
-					return SyncResult.Done;
 				}
 				else
 				{
@@ -49,29 +43,15 @@ namespace Amnesia
 						reqPayload = reader.ReadToEnd();
 
 					ICommand command = (ICommand)SerializationUtil.DeserializeBase64(reqPayload);
-					return command.BeginExecute(ctx, callback);
+					Response response = command.Execute(ctx);
+					ctx.Response.Write(SerializationUtil.SerializeBase64(response));
 				}
 			}
 			catch (Exception error)
 			{
 				var errorResponse = new ErrorResponse() { Message = error.Message, ExceptionType = error.GetType().FullName, StackTrace = error.StackTrace };
 				ctx.Response.Write(SerializationUtil.SerializeBase64(errorResponse));
-				return SyncResult.Done;
 			}
-		}
-
-		void IHttpAsyncHandler.EndProcessRequest(IAsyncResult result)
-		{
-		}
-
-		bool IHttpHandler.IsReusable
-		{
-			get { return true; }
-		}
-
-		void IHttpHandler.ProcessRequest(HttpContext context)
-		{
-			throw new InvalidOperationException();
 		}
 		#endregion
 
@@ -81,51 +61,26 @@ namespace Amnesia
 		/// </summary>
 		static void Rollback(ILog log)
 		{
-			ThreadUtil.StopThreadPoolKeepAlive();
-
-			// Dispose of transaction object on all threads
-			ThreadUtil.ForAllThreads(delegate
-			{
-				if (TransactionScope != null)
-				{
-					try
-					{
-						TransactionScope.Dispose();
-						log.Write("  Transaction started on thread " + Thread.CurrentThread.ManagedThreadId);
-					}
-					catch(Exception e)
-					{
-						log.Write("  Failed to rollback transaction on thread " + Thread.CurrentThread.ManagedThreadId + " (" + Thread.CurrentThread.Name + ")" + ": " + e.Message);
-						throw;
-					}
-					finally
-					{
-						TransactionScope = null;
-					}
-				}
-			}, "rollback");
-
 			// the session has ended
 			Session.ID = Guid.Empty;
+
+			Session.CloseConnections(log);
+
+			log.Write("Aborting transaction");
+			Session.Transaction.Rollback();
+			Session.Transaction.Dispose();
+			Session.Transaction = null;
 		}
 
 		#region Response
 		[Serializable]
-		public class Response : IAsyncResult
+		public class Response
 		{
-			[NonSerialized]
-			bool isCompleted = false;
-
 			internal SerializableLog Log { get; private set; }
 
 			protected Response()
 			{
 				Log = new SerializableLog();
-			}
-
-			internal void Completed()
-			{
-				isCompleted = true;
 			}
 
 			/// <summary>
@@ -134,28 +89,6 @@ namespace Amnesia
 			internal virtual void ReceivedByClient()
 			{
 			}
-
-			#region IAsyncResult
-			object IAsyncResult.AsyncState
-			{
-				get { return null; }
-			}
-
-			WaitHandle IAsyncResult.AsyncWaitHandle
-			{
-				get { return null; }
-			}
-
-			bool IAsyncResult.CompletedSynchronously
-			{
-				get { return false; }
-			}
-
-			bool IAsyncResult.IsCompleted
-			{
-				get { return isCompleted; }
-			}
-			#endregion
 		}
 		#endregion
 
@@ -184,12 +117,14 @@ namespace Amnesia
 
 			Guid sessionId;
 
-			internal override void Execute(HttpContext ctx)
+			public override void Execute(HttpContext ctx)
 			{
+				Module.EnsureRegistered();
+
 				// Wait for all currently executing ASP requests to complete so we're in a clean state
-				// before messing around with the thread pool and transactions.  Being extra careful here
+				// before messing around with transactions.  Being extra careful here
 				// should also prevent bleed over from any prior sessions into this one.
-				using (Module.LockWebServer(WebServerLockTimeoutMS, true, Response.Log))
+				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, true, Response.Log))
 				{
 					// If there is currently an open session, end it before starting a new one
 					if (Session.IsActive)
@@ -201,26 +136,13 @@ namespace Amnesia
 
 					lastServerRollbackStackTrace = null;
 
+					sessionId = Session.ID = Guid.NewGuid();
+					Session.Transaction = Transaction;
+
 					// Watch for when the transaction ends unexpectedly so some cleanup can occur.
 					// This event handler will run on the thread that is causing the rollback which is likely a
 					// different thread than is registering the event handler.
-					// Do this before flooding the thread pool so a failure while propogating the transaction is cleaned up.
 					Transaction.TransactionCompleted += Transaction_TransactionCompleted;
-
-					// Propagate the transaction to all threads in the thread pool.
-					// Must do this proactively rather than in a module due to thread switches
-					// that may occur during I/O operations.
-					sessionId = Session.ID = Guid.NewGuid();
-					
-					ThreadUtil.StartThreadPoolKeepAlive();
-
-					Response.Log.Write("Starting session ({0})", sessionId);
-					ThreadUtil.ForAllThreads(delegate
-					{
-						TransactionScope = new TransactionScope(Transaction.DependentClone(DependentCloneOption.RollbackIfNotComplete));
-						Response.Log.Write("  Transaction started on thread " + Thread.CurrentThread.ManagedThreadId + " (" + Thread.CurrentThread.Name + ")");
-					}, "start transaction");
-					Response.Log.Write("> session started");
 				}
 			}
 
@@ -240,30 +162,24 @@ namespace Amnesia
 
 				lastServerRollbackStackTrace = GetFullStackTrace();
 
-				Response.Log.Write("Transaction aborted unexpectedly by server!  An async rollback will begin momentarily.");
+				Response.Log.Write("Transaction aborted unexpectedly by server!");
 
-				// Queue the rollback operation on a different, non-thread pool thread
-				// so that the web server can be paused before cleaning up.
 				Thread rollbackThread = new Thread(delegate()
 				{
-					Response.Log.Write("Async rollback thread is now running");
-					using (Module.LockWebServer(WebServerLockTimeoutMS, false, Response.Log))
-					{
-						// Verify the session is still active. It may have been ended before the rollback thread was able to
-						// obtain a lock.  Be sure to only end a session that was started by this particular request (via sessionId).
-						if (Session.ID == sessionId)
-						{
-							Response.Log.Write("Rolling back session ({0})", Session.ID);
-							Rollback(Response.Log);
-							Response.Log.Write("> rollback completed");
-						}
-						else
-							Response.Log.Write("There is no active session to rollback");
-					}
-					Response.Log.Write("> Async rollback thread is exiting");
-				});
+					// wait a moment to give the transaction a chance to explicitly roll back
+					Thread.Sleep(5000);
 
-				rollbackThread.Start();
+					if (sessionId != Session.ID)
+						return;
+
+					using(Session.Tracker.Exclusive(10000, false, null))
+					{
+						if (sessionId != Session.ID)
+							return;
+
+						Rollback(NullLog.Instance);
+					}
+				});
 			}
 
 			/// <summary>
@@ -313,9 +229,9 @@ namespace Amnesia
 		[Serializable]
 		internal class EndSessionRequest : Command<EndSessionResponse>
 		{
-			internal override void Execute(HttpContext ctx)
+			public override void Execute(HttpContext ctx)
 			{
-				using (Module.LockWebServer(WebServerLockTimeoutMS, true, Response.Log))
+				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, true, Response.Log))
 				{
 					if (Session.IsActive)
 					{
@@ -341,9 +257,7 @@ namespace Amnesia
 			/// </summary>
 			internal static void EndSession(ILog log)
 			{
-				// End the transaction for all threads
-				// Wait for all threads to rollback before proceeding so
-				// everything is tidy when the request is completed.
+				// End the transaction
 				Rollback(log);
 
 				// Raise event to notify application session has completed
@@ -368,7 +282,7 @@ namespace Amnesia
 		[Serializable]
 		internal class GetStatusRequest : Command<GetStatusResponse>
 		{
-			internal override void Execute(HttpContext ctx)
+			public override void Execute(HttpContext ctx)
 			{
 				Response.LastServerRollbackStackTrace = Handler.lastServerRollbackStackTrace;
 			}
@@ -379,38 +293,6 @@ namespace Amnesia
 		{
 			public string LastServerRollbackStackTrace;
 		}
-		#endregion
-
-		#region SyncResult
-		class SyncResult : IAsyncResult
-		{
-			public static readonly IAsyncResult Done = new SyncResult();
-
-			private SyncResult()
-			{
-			}
-
-			public object AsyncState
-			{
-				get { return null; }
-			}
-
-			public WaitHandle AsyncWaitHandle
-			{
-				get { return null; }
-			}
-
-			public bool CompletedSynchronously
-			{
-				get { return true; }
-			}
-
-			public bool IsCompleted
-			{
-				get { return true; }
-			}
-		}
-
 		#endregion
 	}
 }

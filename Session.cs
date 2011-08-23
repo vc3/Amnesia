@@ -4,6 +4,10 @@ using System.Linq;
 using System.Text;
 using System.Transactions;
 using System.Threading;
+using System.Data;
+using System.Web;
+using System.Data.Common;
+using Amnesia.Data;
 
 namespace Amnesia
 {
@@ -12,14 +16,20 @@ namespace Amnesia
 		static TimeSpan TransactionTimeout = TimeSpan.Zero;
 		static EventHandler afterSessionEnded;
 
+		static readonly object BOUND_KEY = new object();
+		internal static SessionTracker Tracker = new SessionTracker();
+
 		internal TransactionScope TxScope;
+
 		string serviceUrl;
 		EventHandler onAbortedAsync;
 		bool wasAbortedAsync = false;
 		private bool isDisposed;
 		EventHandler onDisposed;
 		ILog log;
-		static Guid id;
+		static Guid id = Guid.Empty;
+
+		static Dictionary<string, AmnesiaDbConnection> connections = new Dictionary<string, AmnesiaDbConnection>();
 
 		#region AbortNotification
 		class AbortNotification : IEnlistmentNotification
@@ -164,6 +174,11 @@ namespace Amnesia
 		}
 
 		/// <summary>
+		/// The active transaction associated with the session
+		/// </summary>
+		internal static Transaction Transaction { get; set; }
+
+		/// <summary>
 		/// Raised just after a session is ended
 		/// </summary>
 		public static event EventHandler AfterSessionEnded
@@ -230,5 +245,101 @@ namespace Amnesia
 				onDisposed(this, EventArgs.Empty);
 		}
 
+		/// <summary>
+		/// Gets or creates a connection that can be used with the current session. If there is no active session, null is returned.
+		/// This connection can and should be shared across threads for transaction rollbacks to work properly.
+		/// </summary>
+		public static IDbConnection GetConnection(string connectionString, Func<string, DbConnection> createConnection)
+		{
+			// Prevent rouge threads from access the shared connection
+			Session.Tracker.AssertActivityStarted();
+
+			string key;
+
+			if (Transaction.TransactionInformation.DistributedIdentifier != null)
+				key = Transaction.TransactionInformation.DistributedIdentifier.ToString();
+			else
+				key = Transaction.TransactionInformation.LocalIdentifier;
+
+			key += "|" + connectionString;
+
+			AmnesiaDbConnection connection = null;
+			lock (connections)
+			{
+				if (!connections.TryGetValue(key, out connection))
+				{
+					connection = new AmnesiaDbConnection(Transaction, createConnection(connectionString));
+					connections[key] = connection;
+				}
+			}
+
+			return connection;
+		}
+
+		/// <summary>
+		/// Because session connections can be shared across threads
+		/// access to them must be synchronized.  For normal connections that are not part of a distributed
+		/// transaction no locking is performed for better performance.
+		/// </summary>
+		public static IDisposable LockConnection(IDbConnection connection)
+		{
+			if(connections.Count == 0)
+				return UndoableAction.Null;
+
+			lock (connections)
+			{
+				if (!(connection is AmnesiaDbConnection) || !connections.Values.Contains((AmnesiaDbConnection)connection))
+					return UndoableAction.Null;
+			}
+
+			Monitor.Enter(connection);
+
+			return new UndoableAction(delegate
+			{
+				Monitor.Exit(connection);
+			});
+		}
+
+		/// <summary>
+		/// Closes all database connections associated with the session.
+		/// </summary>
+		internal static void CloseConnections(ILog log)
+		{
+			List<AmnesiaDbConnection> oldConnections = new List<AmnesiaDbConnection>();
+
+			lock (connections)
+			{
+				foreach (AmnesiaDbConnection c in connections.Values)
+					oldConnections.Add(c);
+
+				connections.Clear();
+			}
+
+			foreach (AmnesiaDbConnection connection in oldConnections)
+			{
+				try
+				{
+					using (LockConnection(connection))
+					{
+						if (connection.Real.State == ConnectionState.Open)
+						{
+							log.Write("Closing: " + connection.Real.ConnectionString);
+							connection.Real.Close();
+						}
+					}
+				}
+				catch { }
+			}
+		}
+
+		/// <summary>
+		/// Registers an activity with the session. This method only needs to be called on threads that are
+		/// not tied to an HttpContext.
+		/// </summary>
+		/// <returns></returns>
+		public static IAsyncActivity NewAsyncActivity()
+		{
+			return Session.IsActive ? new AsyncActivity(Tracker) : NullAsyncActivity.Instance;
+		}
 	}
 }
