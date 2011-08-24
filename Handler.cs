@@ -61,9 +61,9 @@ namespace Amnesia
 		/// </summary>
 		static void Rollback(ILog log)
 		{
-			// the session has ended
+			// mark the session as ended before doing any rollback work
 			Session.ID = Guid.Empty;
-
+			Session.IsRollbackPending = false;
 			Session.CloseConnections(log);
 
 			log.Write("Aborting transaction");

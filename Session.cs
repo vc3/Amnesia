@@ -22,8 +22,6 @@ namespace Amnesia
 		internal TransactionScope TxScope;
 
 		string serviceUrl;
-		EventHandler onAbortedAsync;
-		bool wasAbortedAsync = false;
 		private bool isDisposed;
 		EventHandler onDisposed;
 		ILog log;
@@ -116,10 +114,7 @@ namespace Amnesia
 
 				if (request.Transaction.TransactionInformation.Status == TransactionStatus.Aborted)
 				{
-					wasAbortedAsync = true;
-
-					if(onAbortedAsync != null)
-						onAbortedAsync(this, EventArgs.Empty);
+					Session.IsRollbackPending = true;
 				}
 			}),
 			EnlistmentOptions.None);
@@ -146,6 +141,11 @@ namespace Amnesia
 				return null;
 			}
 		}
+
+		/// <summary>
+		/// Indicates if the session's transaction has been aborted
+		/// </summary>
+		internal static bool IsRollbackPending { get; set; }
 
 		/// <summary>
 		/// Indicates if the current thread is associated with a session
@@ -187,24 +187,6 @@ namespace Amnesia
 			remove { afterSessionEnded -= value; }
 		}
 
-		/// <summary>
-		/// Raised when the session is ended.  This event will be raised by
-		/// a thread other than the one that created the session and can be 
-		/// raised at anytime without warning.
-		/// </summary>
-		public event EventHandler AbortedAsync
-		{
-			add { onAbortedAsync += value; }
-			remove { onAbortedAsync -= value; }
-		}
-
-		/// <summary>
-		/// True if the session has been aborted by a remote participate in the distributed transaction
-		/// </summary>
-		public bool WasAbortedAsync
-		{
-			get { return wasAbortedAsync; }
-		}
 
 		/// <summary>
 		/// Called by a single thread when the session has ended
@@ -228,9 +210,6 @@ namespace Amnesia
 		{
 			isDisposed = true;
 			Session.ID = Guid.Empty;
-
-			// transaction is completing due to local code so disable the AbortedAsync event
-			onAbortedAsync = null;
 
 			// Notify the server of the end of the session. This will rollback the transaction server-side.
 			var response = (new Handler.EndSessionRequest()).Send(serviceUrl);

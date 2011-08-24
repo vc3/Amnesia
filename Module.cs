@@ -29,14 +29,18 @@ namespace Amnesia
 		{
 			try
 			{
+				// make sure application requests do not get through if an unexpected transaction abort occurs
+				if (Session.IsRollbackPending && !(HttpContext.Current.Handler is Amnesia.Handler))
+					throw new ApplicationException("Transaction was aborted and is awaiting rollback");
+
 				Session.Tracker.StartActivity();
 			}
-			catch(InvalidOperationException)
+			catch(InvalidOperationException err)
 			{
 				HttpContext.Current.Items[REQUEST_ABORTED] = true;
 
 				HttpContext.Current.Response.StatusCode = 503; // service unavailable
-				HttpContext.Current.Response.Write("Amnesia is currently blocking requests. Try again in a few moments.");
+				HttpContext.Current.Response.Write("Amnesia is currently blocking requests. Try again in a few moments. " + err.Message);
 				HttpContext.Current.Response.End();
 				return;
 			}
