@@ -138,6 +138,7 @@ namespace Amnesia
 
 					sessionId = Session.ID = Guid.NewGuid();
 					Session.Transaction = Transaction;
+					Response.Log.Write("Session started ({0})", sessionId);
 
 					// Watch for when the transaction ends unexpectedly so some cleanup can occur.
 					// This event handler will run on the thread that is causing the rollback which is likely a
