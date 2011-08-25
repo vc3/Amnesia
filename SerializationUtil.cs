@@ -10,7 +10,7 @@ using System.Xml;
 
 namespace Amnesia
 {
-	public class SerializationUtil
+	class SerializationUtil
 	{
 		static readonly string NullBase64 = "";
 
