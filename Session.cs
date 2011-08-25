@@ -122,8 +122,26 @@ namespace Amnesia
 
 		void LogResponse(Handler.Response response)
 		{
+			LogResponse(response, log);
+		}
+
+		static void LogResponse(Handler.Response response, ILog log)
+		{
 			foreach (string entry in response.Log.Entries)
 				log.Write(entry);
+		}
+
+		/// <summary>
+		/// Ensures that there is not an open session.  Typically sessions should be ended by
+		/// calling Dispose() but this can be used at the very start of a test to ensure that
+		/// the system is in a known state.
+		/// </summary>
+		public static void ResetServer(string serviceUrl, ILog log)
+		{
+			var response = (new Handler.EndSessionRequest()).Send(serviceUrl + Amnesia.Settings.Current.HandlerPath, new TimeSpan(0, 0, 20));
+
+			if (log != null)
+				LogResponse(response, log);
 		}
 
 		/// <summary>
@@ -211,17 +229,22 @@ namespace Amnesia
 			isDisposed = true;
 			Session.ID = Guid.Empty;
 
-			// Notify the server of the end of the session. This will rollback the transaction server-side.
-			var response = (new Handler.EndSessionRequest()).Send(serviceUrl);
-			LogResponse(response);
+			try
+			{
+				// Notify the server of the end of the session. This will rollback the transaction server-side.
+				var response = (new Handler.EndSessionRequest()).Send(serviceUrl);
+				LogResponse(response);
+			}
+			finally
+			{
+				// Now that server is aware, tear down the local transaction scope.
+				Transaction.Current.Rollback();
+				TxScope.Dispose();
 
-			// Now that server is aware, tear down the local transaction scope.
-			Transaction.Current.Rollback();
-			TxScope.Dispose();
-
-			// raise Disposed event
-			if (onDisposed != null)
-				onDisposed(this, EventArgs.Empty);
+				// raise Disposed event
+				if (onDisposed != null)
+					onDisposed(this, EventArgs.Empty);
+			}
 		}
 
 		/// <summary>
