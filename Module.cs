@@ -5,6 +5,7 @@ using System.Text;
 using System.Web;
 using System.Threading;
 using System.Transactions;
+using System.IO;
 
 namespace Amnesia
 {
@@ -14,7 +15,11 @@ namespace Amnesia
 
 		static bool? moduleRegistered;
 		static AutoResetEvent requestsDone;
-		
+
+		static bool sessionRestored;
+		static object stateFileMutex = new object();
+		static string stateFile;
+
 		void IHttpModule.Dispose()
 		{
 		}
@@ -25,17 +30,58 @@ namespace Amnesia
 			context.EndRequest += context_EndRequest;
 		}
 
+		/// <summary>
+		/// Tracks information about the session so rollbacks can be handled cleanly across app domain restarts
+		/// </summary>
+		static internal void PersistSessionState()
+		{
+			if (Session.ID == Guid.Empty)
+			{
+				if (File.Exists(stateFile))
+					File.Delete(stateFile);
+			}
+			else
+			{
+				File.WriteAllText(stateFile, Session.ID.ToString());
+			}
+		}
+
+		/// <summary>
+		/// Reads information about the session so rollbacks can be handled cleanly across app domain restarts
+		/// </summary>
+		static private void RestoreSessionState()
+		{
+			if (File.Exists(stateFile))
+			{
+				Session.IsRollbackPending = true;
+			}
+		}
+
 		void context_BeginRequest(object sender, EventArgs e)
 		{
 			try
 			{
+				// Restore session state if this is the first request
+				if (!sessionRestored)
+				{
+					lock (stateFileMutex)
+					{
+						if (!sessionRestored)
+						{
+							stateFile = Path.Combine(HttpContext.Current.Server.MapPath("~/"), Settings.Current.StateFile);
+							RestoreSessionState();
+							sessionRestored = true;
+						}
+					}
+				}
+
 				// make sure application requests do not get through if an unexpected transaction abort occurs
-				if (Session.IsRollbackPending && !(HttpContext.Current.Handler is Amnesia.Handler))
+				if (Session.IsRollbackPending && !(HttpContext.Current.Request.Url.ToString().Contains(Settings.Current.HandlerPath) ))
 					throw new ApplicationException("Transaction was aborted and is awaiting rollback");
 
 				Session.Tracker.StartActivity();
 			}
-			catch(InvalidOperationException err)
+			catch(Exception err)
 			{
 				HttpContext.Current.Items[REQUEST_ABORTED] = true;
 
