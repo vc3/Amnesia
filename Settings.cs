@@ -5,6 +5,7 @@ namespace Amnesia
 	public class Settings : IConfigurationSectionHandler
 	{
 		string handlerPath;
+		string stateFile;
 
 		public string HandlerPath
 		{
@@ -16,8 +17,10 @@ namespace Amnesia
 
 		public string StateFile
 		{
-			get;
-			private set;
+			get
+			{
+				return stateFile ?? "../Amnesia/State.amnesia";
+			}
 		}
 
 		public static Settings Current
@@ -41,7 +44,7 @@ namespace Amnesia
 				handlerPath = section.Attributes["handlerPath"].Value;
 
 			if (section.Attributes["stateFile"] != null)
-				StateFile = section.Attributes["stateFile"].Value;
+				stateFile = section.Attributes["stateFile"].Value;
 
 			return this;
 		}
