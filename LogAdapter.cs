@@ -21,5 +21,10 @@ namespace Amnesia
 		{
 			write(messageFormat, args);
 		}
+
+		public void CopyInto(ILog log)
+		{
+			throw new NotImplementedException();
+		}
 	}
 }

@@ -15,11 +15,6 @@ namespace Amnesia
 	{
 		const int WebServerLockTimeoutMS = 60000;
 
-		/// <summary>
-		/// Stack trace of the last server-origin rollback
-		/// </summary>
-		static string lastServerRollbackStackTrace;
-
 		#region IHttpAsyncHandler
 
 		bool IHttpHandler.IsReusable
@@ -44,6 +39,7 @@ namespace Amnesia
 
 					ICommand command = (ICommand)SerializationUtil.DeserializeBase64(reqPayload);
 					Response response = command.Execute(ctx);
+
 					ctx.Response.Write(SerializationUtil.SerializeBase64(response));
 				}
 			}
@@ -76,11 +72,13 @@ namespace Amnesia
 		[Serializable]
 		public class Response
 		{
+			internal SerializableLog AsyncLog { get; private set; }
 			internal SerializableLog Log { get; private set; }
 
 			protected Response()
 			{
 				Log = new SerializableLog();
+				AsyncLog = new SerializableLog();
 			}
 
 			/// <summary>
@@ -126,19 +124,23 @@ namespace Amnesia
 				// should also prevent bleed over from any prior sessions into this one.
 				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, true, Response.Log))
 				{
+					Session.AsyncLog.CopyInto(Response.AsyncLog);
+					Session.AsyncLog = new SerializableLog();
+
 					// If there is currently an open session, end it before starting a new one
 					if (Session.IsActive)
 					{
 						Response.Log.Write("Ending prior session ({0})", Session.ID);
 						EndSessionRequest.EndSession(Response.Log);
-						Response.Log.Write("> prior session ended");
 					}
-
-					lastServerRollbackStackTrace = null;
 
 					sessionId = Session.ID = Guid.NewGuid();
 					Session.Transaction = Transaction;
 					Response.Log.Write("Session started ({0})", sessionId);
+					Session.AsyncLog = new SerializableLog();
+
+					Module.PersistSessionState();
+
 
 					// Watch for when the transaction ends unexpectedly so some cleanup can occur.
 					// This event handler will run on the thread that is causing the rollback which is likely a
@@ -153,59 +155,18 @@ namespace Amnesia
 				if (sessionId != Session.ID)
 					return;
 
-				if (Settings.Current.DebugOnUnexpectedRollback)
+				using (Session.Tracker.Exclusive(10000, HttpContext.Current != null, null))
 				{
-					if (!Debugger.IsAttached)
-						Debugger.Launch();
-
-					Debugger.Break();
-				}
-
-				lastServerRollbackStackTrace = GetFullStackTrace();
-
-				Response.Log.Write("Transaction aborted unexpectedly by server!");
-
-				Thread rollbackThread = new Thread(delegate()
-				{
-					// wait a moment to give the transaction a chance to explicitly roll back
-					Thread.Sleep(5000);
-
 					if (sessionId != Session.ID)
 						return;
 
-					using(Session.Tracker.Exclusive(10000, false, null))
-					{
-						if (sessionId != Session.ID)
-							return;
+					StackTrace stackTrace = new StackTrace(1, true);
+					Session.AsyncLog.Write("Transaction aborted unexpectedly by server! Session: {0} \n{1}", sessionId, stackTrace);
 
-						Rollback(NullLog.Instance);
-					}
-				});
-			}
-
-			/// <summary>
-			/// Utility method for getting the full stack trace for a list
-			/// of chained exceptions.
-			/// </summary>
-			/// <param name="error">Last exception in chain</param>
-			/// <returns>Stack trace</returns>
-			static string GetFullStackTrace()
-			{
-				Exception error = new Exception();
-
-				// Include exception info in the message
-				Stack errors = new Stack();
-				for (Exception e = error; null != e; e = e.InnerException)
-					errors.Push(e);
-
-				StringBuilder stackTrace = new StringBuilder();
-				while (errors.Count > 0)
-				{
-					Exception e = (Exception)errors.Pop();
-					stackTrace.AppendFormat("{0}\n {1}\n{2}\n\n", e.Message, e.GetType().FullName, e.StackTrace);
+					// Stop all app requests until the session is rolled back
+					Session.IsRollbackPending = true;
 				}
 
-				return stackTrace.ToString();
 			}
 		}
 
@@ -234,22 +195,27 @@ namespace Amnesia
 			{
 				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, true, Response.Log))
 				{
+					Session.AsyncLog.CopyInto(Response.AsyncLog);
+					Session.AsyncLog = new SerializableLog();
+
 					if (Session.IsActive)
 					{
 						Response.Log.Write("Ending the active session ({0})", Session.ID);
 						EndSession(Response.Log);
 						Response.Log.Write("Session has been ended");
 					}
+					else if(Session.IsRollbackPending)
+					{
+						// handle unexpected app domain restarts where there's no active session but a rollback is still expected
+						Session.IsRollbackPending = false;
+						Response.Log.Write("Cleaned up session after unexpected app domain restart");
+					}
 					else
 					{
 						Response.Log.Write("There is no active session to end");
-
-						if (lastServerRollbackStackTrace != null)
-						{
-							Response.Log.Write("Stack trace from server-origin rollback: " + lastServerRollbackStackTrace);
-							lastServerRollbackStackTrace = null;
-						}
 					}
+
+					Module.PersistSessionState();
 				}
 			}
 
@@ -273,26 +239,6 @@ namespace Amnesia
 			{
 				Session.ID = Guid.Empty;
 			}
-		}
-		#endregion
-
-		#region GetStatus
-		/// <summary>
-		/// Gets status information about Amnesia
-		/// </summary>
-		[Serializable]
-		internal class GetStatusRequest : Command<GetStatusResponse>
-		{
-			public override void Execute(HttpContext ctx)
-			{
-				Response.LastServerRollbackStackTrace = Handler.lastServerRollbackStackTrace;
-			}
-		}
-
-		[Serializable]
-		internal class GetStatusResponse : Response
-		{
-			public string LastServerRollbackStackTrace;
 		}
 		#endregion
 	}

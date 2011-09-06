@@ -19,5 +19,9 @@ namespace Amnesia
 		public void Write(string messageFormat, params object[] args)
 		{
 		}
+
+		public void CopyInto(ILog log)
+		{
+		}
 	}
 }

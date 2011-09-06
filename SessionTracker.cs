@@ -186,17 +186,11 @@ namespace Amnesia
 		/// </summary>
 		internal IDisposable Exclusive(int timeoutMS, bool inActivity, ILog log)
 		{
-			log = log ?? NullLog.Instance;
-
-			log.Write("Acquiring session lock...");
 			Pause(timeoutMS, inActivity);
-			log.Write("> Lock acquired");
 
 			return new UndoableAction(delegate
 			{
-				log.Write("Releasing session lock...");
 				Resume();
-				log.Write("> Lock released");
 			});
 		}
 

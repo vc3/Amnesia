@@ -14,7 +14,11 @@ namespace Amnesia
 			}
 		}
 
-		public bool DebugOnUnexpectedRollback { get; private set; }
+		public string StateFile
+		{
+			get;
+			private set;
+		}
 
 		public static Settings Current
 		{
@@ -36,8 +40,8 @@ namespace Amnesia
 			if (section.Attributes["handlerPath"] != null)
 				handlerPath = section.Attributes["handlerPath"].Value;
 
-			if (section.Attributes["debugOnUnexpectedRollback"] != null)
-				DebugOnUnexpectedRollback = bool.Parse(section.Attributes["debugOnUnexpectedRollback"].Value);
+			if (section.Attributes["stateFile"] != null)
+				StateFile = section.Attributes["stateFile"].Value;
 
 			return this;
 		}

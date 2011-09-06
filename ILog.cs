@@ -8,5 +8,7 @@ namespace Amnesia
 	public interface ILog
 	{
 		void Write(string messageFormat, params object[] args);
+
+		void CopyInto(ILog log);
 	}
 }

@@ -8,6 +8,9 @@ using System.Data;
 using System.Web;
 using System.Data.Common;
 using Amnesia.Data;
+using System.Diagnostics;
+using System.IO;
+using System.Configuration;
 
 namespace Amnesia
 {
@@ -18,6 +21,8 @@ namespace Amnesia
 
 		static readonly object BOUND_KEY = new object();
 		internal static SessionTracker Tracker = new SessionTracker();
+
+		internal static ILog AsyncLog = NullLog.Instance;
 
 		internal TransactionScope TxScope;
 
@@ -61,6 +66,7 @@ namespace Amnesia
 			}
 		}
 		#endregion
+
 
 		/// <summary>
 		/// Starts a new Amnesia session with a remote application
@@ -127,6 +133,13 @@ namespace Amnesia
 
 		static void LogResponse(Handler.Response response, ILog log)
 		{
+			if (response.AsyncLog.Entries.Count() > 0)
+			{
+				log.Write("Log entries written before this Amnesia command:");
+				foreach (string entry in response.AsyncLog.Entries)
+					log.Write(entry);
+			}
+
 			foreach (string entry in response.Log.Entries)
 				log.Write(entry);
 		}
@@ -142,22 +155,6 @@ namespace Amnesia
 
 			if (log != null)
 				LogResponse(response, log);
-		}
-
-		/// <summary>
-		/// Gets the callstack at the time a server-origin rollback occured
-		/// </summary>
-		public string GetServerRollbackStackTrace()
-		{
-			try
-			{
-				var status = (new Handler.GetStatusRequest().Send(serviceUrl, new TimeSpan(0, 0, 20)));
-				return status.LastServerRollbackStackTrace;
-			}
-			catch
-			{
-				return null;
-			}
 		}
 
 		/// <summary>
@@ -204,7 +201,6 @@ namespace Amnesia
 			add { afterSessionEnded += value; }
 			remove { afterSessionEnded -= value; }
 		}
-
 
 		/// <summary>
 		/// Called by a single thread when the session has ended
@@ -327,6 +323,10 @@ namespace Amnesia
 						{
 							log.Write("Closing: " + connection.Real.ConnectionString);
 							connection.Real.Close();
+						}
+						else
+						{
+							log.Write("Already closed: " + connection.Real.ConnectionString);
 						}
 					}
 				}
