@@ -76,7 +76,7 @@ namespace Amnesia
 				}
 
 				// make sure application requests do not get through if an unexpected transaction abort occurs
-				if (Session.IsRollbackPending && !(HttpContext.Current.Request.Url.ToString().Contains(Settings.Current.HandlerPath) ))
+				if (Session.IsRollbackPending && !(HttpContext.Current.Request.Url.ToString().ToLower().Contains(Settings.Current.HandlerPath.ToLower()) ))
 					throw new ApplicationException("Transaction was aborted and is awaiting rollback");
 
 				Session.Tracker.StartActivity();

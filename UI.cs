@@ -23,7 +23,7 @@ namespace Amnesia
 		public static void ProcessRequest(HttpContext ctx)
 		{
 			bool silent = !string.IsNullOrEmpty(ctx.Request.QueryString["silent"]);
-
+			
 			if (ctx.Request.QueryString["cmd"] == "start")
 			{
 				if (scopeThread != null)
@@ -67,11 +67,14 @@ namespace Amnesia
 				}
 				finally
 				{
-					// notify the root thread that the scope can be released
-					requestThreadProceed.Reset();
-					scopeThreadProceed.Set();
-					requestThreadProceed.WaitOne();
-					scopeThread = null;
+					if (scopeThread != null)
+					{
+						// notify the root thread that the scope can be released
+						requestThreadProceed.Reset();
+						scopeThreadProceed.Set();
+						requestThreadProceed.WaitOne();
+						scopeThread = null;
+					}
 				}
 			}
 
@@ -82,13 +85,16 @@ namespace Amnesia
 					<html>
 					<body>");
 
-				if (!Session.IsActive)
+				if (!Session.IsActive && !Session.IsRollbackPending)
 					ctx.Response.Write(@"<a href='?cmd=start'>Start Session</a>");
 				else
 				{
 					ctx.Response.Write(string.Format(@"<a href='?cmd=end'>End Session</a><br/>"));
+					
 					ctx.Response.Write(string.Format(@"ID: {0}</br>", Session.ID));
-					ctx.Response.Write(string.Format(@"Transaction: {0}</br>", Session.Transaction.TransactionInformation.Status));
+
+					if (Session.Transaction != null)
+						ctx.Response.Write(string.Format(@"Transaction: {0}</br>", Session.Transaction.TransactionInformation.Status));
 				}
 				ctx.Response.Write(@"<br /><br /><a href='?cmd=status'>Refresh Status</a>");
 
