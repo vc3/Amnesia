@@ -86,7 +86,7 @@ namespace Amnesia
 				HttpContext.Current.Items[REQUEST_ABORTED] = true;
 
 				HttpContext.Current.Response.StatusCode = 503; // service unavailable
-				HttpContext.Current.Response.Write("Amnesia is currently blocking requests. Try again in a few moments. " + err.Message);
+				HttpContext.Current.Response.Write("Amnesia is currently blocking requests. " + err.Message);
 				HttpContext.Current.Response.End();
 				return;
 			}
