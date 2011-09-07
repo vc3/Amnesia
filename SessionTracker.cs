@@ -9,134 +9,194 @@ namespace Amnesia
 {
 	class SessionTracker
 	{
-		static Guid NO_GROUP = new Guid();
-
 		[ThreadStatic]
-		static Guid threadGroup;
-		object THREAD_GROUP = new object();		
+		static ActivityInfo threadActivity;
+		object THREAD_ACTIVITY = new object();		
 
 		object fieldsLock = new object();
 		object pauseLock = new object();
-		int activitiesExecuting = 0;
-		int freeActivities = -1;
+		int activityCount = 0;
 		bool paused = false;
 		AutoResetEvent activitiesDone;
+		int pendingActivities;
 
-		Guid activityGroup = NO_GROUP;
+		internal class ActivityInfo
+		{
+			public Guid ID;
+			public int ThreadCount = 1;
+		}
 
-		internal void StartActivity()
+		ActivityInfo CurrentThreadActivity
+		{
+			get
+			{
+				if (HttpContext.Current != null)
+					return (ActivityInfo)HttpContext.Current.Items[THREAD_ACTIVITY];
+				else
+					return threadActivity;
+			}
+			set
+			{
+				if (HttpContext.Current != null)
+					HttpContext.Current.Items[THREAD_ACTIVITY] = value;
+				else
+					threadActivity = value;
+			}
+		}
+
+		#region Activity start/stop
+		public void StartActivity()
 		{
 			lock (fieldsLock)
 			{
-				IncrementActivityCount();
-				BindActivityToThread();
+				EnsureNotPaused();
+
+				if (CurrentThreadActivity != null)
+					throw new InvalidOperationException("An activity has already been started");
+
+				CurrentThreadActivity = new ActivityInfo() { ID = Guid.NewGuid() };
+				++activityCount;
 			}
 		}
 
 		/// <summary>
+		/// Ends an activity started with StartActivity or AsyncActivityStarted
+		/// </summary>
+		public void EndActivity()
+		{
+			lock (fieldsLock)
+			{
+				DecrementActivityCount();
+			}
+		}
+		#endregion
+
+		#region Async dependent activities
+		/// <summary>
+		/// Called by the thread that is initiating an async activity on a second thread.
+		/// </summary>
+		public ActivityInfo AsyncDependentActivityIdentified()
+		{
+			var activity = CurrentThreadActivity;
+			if (activity == null)
+				throw new InvalidOperationException("Expected to join into an existing activity but there is not one");
+
+			lock (fieldsLock)
+			{
+				++activity.ThreadCount;
+			}
+
+			return activity;
+		}
+
+		/// <summary>
+		/// Called by the thread executing the async activity
+		/// </summary>
+		public void AsyncDependentActivityStarted(ActivityInfo parentActivity)
+		{
+			// Associate the new thread to the parent activity
+			CurrentThreadActivity = parentActivity;
+		}
+
+		/// <summary>
+		/// Called by the async thread when its activity is complete
+		/// </summary>
+		public void AsyncDependentActivityEnded()
+		{
+			lock (fieldsLock)
+			{
+				DecrementActivityCount();
+			}
+		}
+		#endregion
+
+		#region Exclusive locking
+		/// <summary>
+		/// Stop all new activities and wait for the current ones to complete. When
+		/// this method returns, all activities (execpt for the current Amnesia one) will have
+		/// completed and any future activities will be denied.
+		/// </summary>
+		public IDisposable Exclusive(int timeoutMS, ILog log)
+		{
+			Pause(timeoutMS);
+
+			return new UndoableAction(delegate
+			{
+				Resume();
+			});
+		}
+
+		/// <summary>
+		/// Throws an exception if the current thread is not tied to an activity
+		/// </summary>
+		public void AssertActivityStarted()
+		{
+			if (CurrentThreadActivity == null)
+			{
+				if (HttpContext.Current != null)
+					throw new InvalidOperationException("The web request is not associated with the Amnesia session.  Call Session.StartActivity() first.");
+
+				throw new InvalidOperationException("Thread " + Thread.CurrentThread.ManagedThreadId + " (" + Thread.CurrentThread.Name + ") is not associated with the Amnesia session.   Call Session.StartActivity() first.");
+			}
+		}
+		#endregion
+
+		#region Private methods
+		/// <summary>
 		/// Caller is responsible for synchronization
 		/// </summary>
-		void IncrementActivityCount()
+		private void EnsureNotPaused()
 		{
 			// Abort all activities when paused
 			if (paused)
 				throw new InvalidOperationException("All new activities are paused");
-
-			// Track that an activity has been started
-			if (activitiesExecuting == freeActivities)
-				activityGroup = Guid.NewGuid();
-
-			++activitiesExecuting;
 		}
 
 		/// <summary>
-		/// Caller is responsible for synchronization
+		/// Called when an activity is completed. Both async and sync activities.
 		/// </summary>
-		void BindActivityToThread()
+		private void DecrementActivityCount()
 		{
-			// Track which threads that are associated to the session
-			if (HttpContext.Current != null)
-				HttpContext.Current.Items[THREAD_GROUP] = activityGroup;
-			else
-				threadGroup = activityGroup;
-		}
+			// ASSERT: one activity is executing
+			if (activityCount == 0)
+				throw new InvalidOperationException("Unbalanced call to EndActivity");
 
-		internal void EndActivity()
-		{
-			lock (fieldsLock)
+			// ASSERT: at least one thread is bound to the current activity
+			var activity = CurrentThreadActivity;
+			if (activity == null)
+				throw new InvalidOperationException("Unbalanced call to EndActivity");
+
+			CurrentThreadActivity = null;
+
+			if (activity.ThreadCount == 0)
+				throw new InvalidOperationException("Unbalanced call to EndActivity");
+
+
+			// Have all threads completed work on this activity?
+			--activity.ThreadCount;
+
+			if (activity.ThreadCount == 0)
 			{
-				// Track that a request is ending
-				--activitiesExecuting;
-
-				if (activitiesExecuting == 0)
-					activityGroup = Guid.NewGuid();
-
-				// disassociate thread from session
-				if (HttpContext.Current != null)
-					HttpContext.Current.Items[THREAD_GROUP] = NO_GROUP;
-				else
-					threadGroup = NO_GROUP;
+				// activity is complete
+				--activityCount;
 
 				// Notify any interested thread that there are no more activities executing
-				if (activitiesExecuting == freeActivities)
+				if (activitiesDone != null)
 				{
-					// change group id to disassociate all threads just in case
-					activityGroup = Guid.NewGuid();
-					
-					if (activitiesDone != null)
+					--pendingActivities;
+
+					if(pendingActivities == 0)
 						activitiesDone.Set();
 				}
-
-				else if (activitiesExecuting < freeActivities)
-				{
-					// DEADLOCK: The request that requested the lock has ended but all future activities are being
-					// blocked so the lock can never be released!
-
-					// Correctly written code should never get here but it seems like the best thing to do is to
-					// release the lock to prevent a deadlock.
-					Resume();
-				}
-			}
-		}
-
-		internal void AsyncActivityIdentified()
-		{
-			lock (fieldsLock)
-				IncrementActivityCount();
-		}
-
-		internal void AsyncActivityStarted()
-		{
-			lock (fieldsLock)
-				BindActivityToThread();
-		}
-
-		internal void AsyncActivityEnded()
-		{
-			EndActivity();
-		}
-
-		/// <summary>
-		/// Allow new activites to start
-		/// </summary>
-		private void Resume()
-		{
-			lock (fieldsLock)
-			{
-				paused = false;
-				freeActivities = 0;
-
-				// release the lock
-				Monitor.Exit(pauseLock);
 			}
 		}
 
 		/// <summary>
 		/// Stop all incoming activities and wait for the current activities to complete. When
-		/// this method returns, all activities (execpt for the current Amnesia one) will have
+		/// this method returns, all activities (except for the current Amnesia one) will have
 		/// completed and any future activities will be denied.
 		/// </summary>
-		private void Pause(int timeoutMS, bool inActivity)
+		private void Pause(int timeoutMS)
 		{
 			// Ensure only a single thread owns the pause lock.
 			Monitor.Enter(pauseLock);
@@ -151,14 +211,16 @@ namespace Amnesia
 					// stop future activities from starting
 					paused = true;
 
-					// Take into account that the lock request may be occuring either from an existing activity
-					freeActivities = inActivity ? 1 : 0;
-
 					// Wait for any activities that are currently executing to complete
-					if (activitiesExecuting > freeActivities)
+					int freeActivities = (CurrentThreadActivity != null ? 1 : 0);
+
+					if (activityCount > freeActivities)
 					{
 						// Let other threads know we're interested in knowing when we're idle and wait
 						activitiesDone = new AutoResetEvent(false);
+
+						// Take into account that the lock request may be occuring either from an existing activity
+						pendingActivities = activityCount - freeActivities;
 					}
 				}
 
@@ -169,7 +231,7 @@ namespace Amnesia
 					activitiesDone = null;
 				}
 
-				// Hold the pauseLock open until ResumeRequests()
+				// Hold the pauseLock open until Resume()
 			}
 			catch (Exception)
 			{
@@ -180,38 +242,18 @@ namespace Amnesia
 		}
 
 		/// <summary>
-		/// Stop all new activities and wait for the current ones to complete. When
-		/// this method returns, all activities (execpt for the current Amnesia one) will have
-		/// completed and any future activities will be denied.
+		/// Allow new activites to start
 		/// </summary>
-		internal IDisposable Exclusive(int timeoutMS, bool inActivity, ILog log)
-		{
-			Pause(timeoutMS, inActivity);
-
-			return new UndoableAction(delegate
-			{
-				Resume();
-			});
-		}
-
-		/// <summary>
-		/// Throws an exception if the current thread is not tied to an activity
-		/// </summary>
-		internal void AssertActivityStarted()
+		private void Resume()
 		{
 			lock (fieldsLock)
 			{
-				// disassociate thread from session
-				if (HttpContext.Current != null)
-				{
-					if (!activityGroup.Equals(HttpContext.Current.Items[THREAD_GROUP]))
-						throw new InvalidOperationException("The web request is not associated with the Amnesia session.  Call Session.StartActivity() first.");
-				}
-				else if (!activityGroup.Equals(threadGroup))
-				{
-					throw new InvalidOperationException("Thread " + Thread.CurrentThread.ManagedThreadId + " (" + Thread.CurrentThread.Name + ") is not associated with the Amnesia session.   Call Session.StartActivity() first.");
-				}
+				paused = false;
+
+				// release the lock
+				Monitor.Exit(pauseLock);
 			}
 		}
+		#endregion
 	}
 }

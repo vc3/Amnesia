@@ -122,7 +122,7 @@ namespace Amnesia
 				// Wait for all currently executing ASP requests to complete so we're in a clean state
 				// before messing around with transactions.  Being extra careful here
 				// should also prevent bleed over from any prior sessions into this one.
-				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, true, Response.Log))
+				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, Response.Log))
 				{
 					Session.AsyncLog.CopyInto(Response.AsyncLog);
 					Session.AsyncLog = new SerializableLog();
@@ -155,7 +155,7 @@ namespace Amnesia
 				if (sessionId != Session.ID)
 					return;
 
-				using (Session.Tracker.Exclusive(10000, HttpContext.Current != null, null))
+				using (Session.Tracker.Exclusive(10000, null))
 				{
 					if (sessionId != Session.ID)
 						return;
@@ -193,7 +193,7 @@ namespace Amnesia
 		{
 			public override void Execute(HttpContext ctx)
 			{
-				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, true, Response.Log))
+				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, Response.Log))
 				{
 					Session.AsyncLog.CopyInto(Response.AsyncLog);
 					Session.AsyncLog = new SerializableLog();

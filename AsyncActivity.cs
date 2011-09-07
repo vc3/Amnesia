@@ -8,21 +8,22 @@ namespace Amnesia
 	class AsyncActivity : IAsyncActivity
 	{
 		SessionTracker tracker;
+		SessionTracker.ActivityInfo activity;
 
 		public AsyncActivity(SessionTracker tracker)
 		{
 			this.tracker = tracker;
-			tracker.AsyncActivityIdentified();
+			this.activity = tracker.AsyncDependentActivityIdentified();
 		}
 
 		public void Starting()
 		{
-			tracker.AsyncActivityStarted();
+			tracker.AsyncDependentActivityStarted(activity);
 		}
 
 		public void Ended()
 		{
-			tracker.AsyncActivityEnded();
+			tracker.AsyncDependentActivityEnded();
 		}
 	}
 }
