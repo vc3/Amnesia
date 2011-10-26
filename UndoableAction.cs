@@ -14,7 +14,6 @@ namespace Amnesia
 		public static IDisposable Null = new UndoableAction(null);
 
 		Action undo;
-		Action<string, object[]> log;
 
 		public UndoableAction(Action undo)
 		{

@@ -17,9 +17,6 @@ namespace Amnesia
 		static ManualResetEvent requestThreadProceed = new ManualResetEvent(false);
 		static ManualResetEvent scopeThreadProceed = new ManualResetEvent(false);
 
-		[ThreadStatic]
-		static TransactionScope currentScope;
-
 		public static void ProcessRequest(HttpContext ctx)
 		{
 			bool silent = !string.IsNullOrEmpty(ctx.Request.QueryString["silent"]);

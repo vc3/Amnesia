@@ -14,7 +14,6 @@ namespace Amnesia
 		static object REQUEST_ABORTED = new object();
 
 		static bool? moduleRegistered;
-		static AutoResetEvent requestsDone;
 
 		static bool sessionRestored;
 		static object stateFileMutex = new object();
