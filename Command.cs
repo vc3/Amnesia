@@ -41,7 +41,7 @@ namespace Amnesia
 
 		public TResponse Send(string serviceUrl)
 		{
-			return Send(serviceUrl, TimeSpan.Zero);
+			return Send(serviceUrl, Settings.Current.Timeout);
 		}
 
 		public TResponse Send(string serviceUrl, TimeSpan retryPeriodOnServiceUnavailable)

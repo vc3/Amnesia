@@ -1,4 +1,5 @@
 ﻿using System.Configuration;
+using System;
 
 namespace Amnesia
 {
@@ -6,6 +7,7 @@ namespace Amnesia
 	{
 		string handlerPath;
 		string stateFile;
+		int timeout;
 
 		public string HandlerPath
 		{
@@ -20,6 +22,17 @@ namespace Amnesia
 			get
 			{
 				return stateFile ?? "../Amnesia/State.amnesia";
+			}
+		}
+
+		/// <summary>
+		/// The number of seconds to wait when issuing a command
+		/// </summary>
+		public TimeSpan Timeout
+		{
+			get
+			{
+				return timeout == Int32.MinValue ? TimeSpan.Zero : new TimeSpan(0, 0, timeout);
 			}
 		}
 
@@ -45,6 +58,9 @@ namespace Amnesia
 
 			if (section.Attributes["stateFile"] != null)
 				stateFile = section.Attributes["stateFile"].Value;
+
+			if (section.Attributes["timeout"] != null)
+				timeout = Int32.Parse(section.Attributes["timeout"].Value);
 
 			return this;
 		}
