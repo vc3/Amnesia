@@ -114,6 +114,10 @@ namespace Amnesia
 				{
 					if (HttpContext.Current != null)
 					{
+						// HttpContext.Current.ApplicationInstance will be null if using Classic mode
+						if (!HttpRuntime.UsingIntegratedPipeline)
+							throw new ApplicationException("Amnesia requires that the ASP.NET application pool use Integrated Pipeline mode");
+
 						foreach (string moduleName in HttpContext.Current.ApplicationInstance.Modules)
 						{
 							if (HttpContext.Current.ApplicationInstance.Modules[moduleName] is Amnesia.Module)
