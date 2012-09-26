@@ -49,9 +49,11 @@ namespace Amnesia
 			}
 		}
 
-		#region IConfigurationSectionHandler Members
+		Settings()
+		{
+		}
 
-		public object Create(object parent, object configContext, System.Xml.XmlNode section)
+		Settings(object parent, object configContext, System.Xml.XmlNode section)
 		{
 			if (section.Attributes["handlerPath"] != null)
 				handlerPath = section.Attributes["handlerPath"].Value;
@@ -61,8 +63,14 @@ namespace Amnesia
 
 			if (section.Attributes["timeout"] != null)
 				timeout = Int32.Parse(section.Attributes["timeout"].Value);
+		}
 
-			return this;
+
+		#region IConfigurationSectionHandler Members
+
+		public object Create(object parent, object configContext, System.Xml.XmlNode section)
+		{
+			return new Settings(parent, configContext, section);
 		}
 
 		#endregion
