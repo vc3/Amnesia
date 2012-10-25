@@ -6,6 +6,7 @@ using System.Web;
 using System.Threading;
 using System.Transactions;
 using System.IO;
+using System.Diagnostics;
 
 namespace Amnesia
 {
@@ -115,7 +116,7 @@ namespace Amnesia
 					if (HttpContext.Current != null)
 					{
 						// HttpContext.Current.ApplicationInstance will be null if using Classic mode
-						if (!HttpRuntime.UsingIntegratedPipeline)
+						if (GetIISVersion() >= 7 && !HttpRuntime.UsingIntegratedPipeline)
 							throw new ApplicationException("Amnesia requires that the ASP.NET application pool use Integrated Pipeline mode");
 
 						foreach (string moduleName in HttpContext.Current.ApplicationInstance.Modules)
@@ -133,6 +134,25 @@ namespace Amnesia
 
 				return moduleRegistered.Value;
 			}
+		}
+
+		/// <summary>
+		/// Gets the current version of IIS.  Must be called within worker process
+		/// </summary>
+		/// <returns>The current version of IIS running</returns>
+		private static int GetIISVersion()
+		{
+			int version;
+			using (Process process = Process.GetCurrentProcess())
+			{
+				using (ProcessModule mainModule = process.MainModule)
+				{
+					// main module would be w3wp
+					version = mainModule.FileVersionInfo.FileMajorPart;
+				}
+			}
+
+			return version;
 		}
 	}
 }
