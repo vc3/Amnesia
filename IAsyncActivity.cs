@@ -12,5 +12,6 @@ namespace Amnesia
 	{
 		void Starting();
 		void Ended();
+		void WaitUntilEnded(int milliseconds);
 	}
 }

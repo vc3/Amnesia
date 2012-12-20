@@ -12,5 +12,6 @@ namespace Amnesia
 		private NullAsyncActivity() { }
 		public void Starting() { }
 		public void Ended() { }
+		public void WaitUntilEnded(int milliseconds) { }
 	}
 }

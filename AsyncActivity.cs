@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 namespace Amnesia
 {
@@ -9,6 +10,7 @@ namespace Amnesia
 	{
 		SessionTracker tracker;
 		SessionTracker.ActivityInfo activity;
+		ManualResetEvent doneEvent = new ManualResetEvent(false);
 
 		public AsyncActivity(SessionTracker tracker)
 		{
@@ -23,7 +25,19 @@ namespace Amnesia
 
 		public void Ended()
 		{
-			tracker.AsyncDependentActivityEnded();
+			try
+			{
+				tracker.AsyncDependentActivityEnded();
+			}
+			finally
+			{
+				doneEvent.Set();
+			}
+		}
+
+		public void WaitUntilEnded(int milliseconds)
+		{
+			doneEvent.WaitOne(milliseconds);
 		}
 	}
 }
