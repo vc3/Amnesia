@@ -80,6 +80,7 @@ namespace Amnesia
 				// Output UI based on new state
 				ctx.Response.Write(@"
 					<html>
+					<head><title>Amnesia UI</title></head>
 					<body>");
 
 				if (!Session.IsActive && !Session.IsRollbackPending)
