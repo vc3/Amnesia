@@ -235,7 +235,7 @@ namespace Amnesia
 			}
 			catch (Exception)
 			{
-				// An unexpected error occured so release the pauseLock
+				// An unexpected error occurred so release the pauseLock
 				Resume();
 				throw;
 			}
