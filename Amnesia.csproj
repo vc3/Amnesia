@@ -55,10 +55,14 @@
     <Compile Include="Data\DisconnectedReader.cs" />
     <Compile Include="ILog.cs" />
     <Compile Include="IAsyncActivity.cs" />
+    <Compile Include="IParallelActivity.cs" />
+    <Compile Include="IParallelActivityThread.cs" />
     <Compile Include="LogAdapter.cs" />
     <Compile Include="Module.cs" />
     <Compile Include="NullAsyncActivity.cs" />
     <Compile Include="NullLog.cs" />
+    <Compile Include="NullParallelActivity.cs" />
+    <Compile Include="ParallelActivity.cs" />
     <Compile Include="SerializableLog.cs" />
     <Compile Include="SerializationUtil.cs" />
     <Compile Include="Handler.cs" />

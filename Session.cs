@@ -343,5 +343,16 @@ namespace Amnesia
 		{
 			return Session.IsActive ? new AsyncActivity(Tracker) : NullAsyncActivity.Instance;
 		}
+
+		/// <summary>
+		/// Registers an multithreaded activity with the session that will execute synchronously relative to
+		/// the current activity already underway.  In other words, the parallel activity must complete prior
+		/// to the current activity completing (unlike NewAsyncActivity).
+		/// </summary>
+		/// <returns></returns>
+		public static IParallelActivity NewParallelActivity()
+		{
+			return Session.IsActive ? new ParallelActivity(Tracker) : NullParallelActivity.Instance;
+		}
 	}
 }

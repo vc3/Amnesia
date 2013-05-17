@@ -108,6 +108,61 @@ namespace Amnesia
 				DecrementActivityCount();
 			}
 		}
+
+		/// <summary>
+		/// Called by the thread that is initiating an async activity on a second thread.
+		/// </summary>
+		public ActivityInfo ParallelDependentActivityIdentified()
+		{
+			var activity = CurrentThreadActivity;
+			if (activity == null)
+				throw new InvalidOperationException("Expected to join into an existing activity but there is not one");
+
+			++activity.ThreadCount;
+
+			return activity;
+		}
+
+
+		/// <summary>
+		/// Called by the thread executing the async activity
+		/// </summary>
+		public void ParallelDependentActivityStarted(ActivityInfo parentActivity)
+		{
+			lock (fieldsLock)
+			{
+				++parentActivity.ThreadCount;
+			}
+
+			// Associate the new thread to the parent activity
+			CurrentThreadActivity = parentActivity;
+		}
+
+		/// <summary>
+		/// Called by the async thread when its activity is complete
+		/// </summary>
+		public void ParallelDependentActivityEnded()
+		{
+			lock (fieldsLock)
+			{
+				DecrementActivityCount();
+			}
+		}
+
+		/// <summary>
+		/// Called by the thread that is initiating a parallel activity to indicate that all threads should be completed.
+		/// </summary>
+		public void ParallelDependentActivityCompleted()
+		{
+			lock (fieldsLock)
+			{
+				ActivityInfo activity = CurrentThreadActivity;
+				--activity.ThreadCount;
+
+				if (activity.ThreadCount != 1)
+					throw new ApplicationException("Some threads that were part of an Amnesia parallel activity did not report back thay they have completed their work but should have.");
+			}
+		}
 		#endregion
 
 		#region Exclusive locking
