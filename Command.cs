@@ -72,7 +72,7 @@ namespace Amnesia
 			}
 			catch (WebException err)
 			{
-				if (((HttpWebResponse)err.Response).StatusCode == HttpStatusCode.ServiceUnavailable && (DateTime.Now - startTime) < retryPeriodOnServiceUnavailable)
+				if (err.Response != null && ((HttpWebResponse)err.Response).StatusCode == HttpStatusCode.ServiceUnavailable && (DateTime.Now - startTime) < retryPeriodOnServiceUnavailable)
 				{
 					// wait a moment then retry
 					Thread.Sleep(1000);
