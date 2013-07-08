@@ -254,7 +254,7 @@ namespace Amnesia
 
 			string key;
 
-			if (Transaction.TransactionInformation.DistributedIdentifier != null)
+			if (Transaction.TransactionInformation.DistributedIdentifier != Guid.Empty)
 				key = Transaction.TransactionInformation.DistributedIdentifier.ToString();
 			else
 				key = Transaction.TransactionInformation.LocalIdentifier;
