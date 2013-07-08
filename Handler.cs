@@ -141,7 +141,6 @@ namespace Amnesia
 
 					Module.PersistSessionState();
 
-
 					// Watch for when the transaction ends unexpectedly so some cleanup can occur.
 					// This event handler will run on the thread that is causing the rollback which is likely a
 					// different thread than is registering the event handler.
@@ -152,7 +151,7 @@ namespace Amnesia
 			void Transaction_TransactionCompleted(object sender, TransactionEventArgs e)
 			{
 				// Only attempt a rollback if the session we are interested in is still active
-				if (sessionId != Session.ID)
+				if (sessionId != Session.ID  || Session.IsRollbackPending)
 					return;
 
 				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, null))
@@ -186,7 +185,6 @@ namespace Amnesia
 		#region EndSession
 		/// <summary>
 		/// Request that can be sent to the handler to end an active session.
-		/// No need to explicitly end the session if a transaction is rolled back due to a failure
 		/// </summary>
 		[Serializable]
 		internal class EndSessionRequest : Command<EndSessionResponse>
@@ -238,6 +236,30 @@ namespace Amnesia
 			internal override void ReceivedByClient()
 			{
 				Session.ID = Guid.Empty;
+			}
+		}
+		#endregion
+
+		#region PrepareToEndSession
+		/// <summary>
+		/// Notify the handler that the session will be explicitly ended next.  Used to manage ending
+		/// multiple concurrent sessions.
+		/// </summary>
+		[Serializable]
+		internal class PrepareToEndSessionRequest : Command<PrepareEndSessionResponse>
+		{
+			protected override void OnExecute(HttpContext ctx)
+			{
+				Session.IsRollbackPending = true;
+				Response.Log.Write("Session is now expecting to be rolled back. New requests are being blocked. ({0})", Session.ID);
+			}
+		}
+
+		[Serializable]
+		internal class PrepareEndSessionResponse : Response
+		{
+			internal override void ReceivedByClient()
+			{
 			}
 		}
 		#endregion

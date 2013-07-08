@@ -220,6 +220,13 @@ namespace Amnesia
 			remove { onDisposed -= value; }
 		}
 
+		public void PrepareForDispose()
+		{
+			// Notify the server that the session will be ended momentarily. This will block all non-Amnesia
+			// requests and cause the server to ignore async rollback notifications.
+			var response = (new Handler.PrepareToEndSessionRequest()).Send(serviceUrl);
+		}
+
 		public void Dispose()
 		{
 			isDisposed = true;
