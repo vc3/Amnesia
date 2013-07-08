@@ -115,7 +115,7 @@ namespace Amnesia
 
 			Guid sessionId;
 
-			public override void Execute(HttpContext ctx)
+			protected override void OnExecute(HttpContext ctx)
 			{
 				Module.EnsureRegistered();
 
@@ -155,7 +155,7 @@ namespace Amnesia
 				if (sessionId != Session.ID)
 					return;
 
-				using (Session.Tracker.Exclusive(10000, null))
+				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, null))
 				{
 					if (sessionId != Session.ID)
 						return;
@@ -191,7 +191,7 @@ namespace Amnesia
 		[Serializable]
 		internal class EndSessionRequest : Command<EndSessionResponse>
 		{
-			public override void Execute(HttpContext ctx)
+			protected override void OnExecute(HttpContext ctx)
 			{
 				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, Response.Log))
 				{

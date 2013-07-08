@@ -23,7 +23,20 @@ namespace Amnesia
 		/// <summary>
 		/// Override in each command subclass.
 		/// </summary>
-		public abstract void Execute(HttpContext ctx);
+		protected abstract void OnExecute(HttpContext ctx);
+
+		public void Execute(HttpContext ctx)
+		{
+			try
+			{
+				OnExecute(ctx);
+			}
+			catch (Exception ex)
+			{
+				Response.Log.Write("Error in the {0} amnesia command: \n{1}", GetType().Name, ex.StackTrace);
+				throw;
+			}
+		}
 
 		/// <summary>
 		/// The response of the command

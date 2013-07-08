@@ -173,7 +173,7 @@ namespace Amnesia
 		/// </summary>
 		public IDisposable Exclusive(int timeoutMS, ILog log)
 		{
-			Pause(timeoutMS);
+			Pause(timeoutMS, log);
 
 			return new UndoableAction(delegate
 			{
@@ -251,7 +251,7 @@ namespace Amnesia
 		/// this method returns, all activities (except for the current Amnesia one) will have
 		/// completed and any future activities will be denied.
 		/// </summary>
-		private void Pause(int timeoutMS)
+		private void Pause(int timeoutMS, ILog log)
 		{
 			// Ensure only a single thread owns the pause lock.
 			Monitor.Enter(pauseLock);
@@ -282,8 +282,15 @@ namespace Amnesia
 				// Wait for other request threads to complete
 				if (activitiesDone != null)
 				{
-					activitiesDone.WaitOne();
+					log.Write("Waiting for other amnesia activities to complete...");
+
+					bool signalReceived = activitiesDone.WaitOne(timeoutMS);
 					activitiesDone = null;
+
+					if(signalReceived)
+						log.Write("Other amnesia activities completed successfully.");
+					else
+						log.Write(string.Format("WARNING: Timeout ({0} milliseconds) reached while waiting for other amnesia activities to complete.", timeoutMS));
 				}
 
 				// Hold the pauseLock open until Resume()
