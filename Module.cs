@@ -42,7 +42,11 @@ namespace Amnesia
 			}
 			else
 			{
-				File.WriteAllText(stateFile, Session.ID.ToString());
+                //make sure the parent Directory is there before saving the file.
+                if (!Directory.Exists(Path.GetDirectoryName(stateFile)))
+                    Directory.CreateDirectory(Path.GetDirectoryName(stateFile));
+                    
+				    File.WriteAllText(stateFile, Session.ID.ToString());
 			}
 		}
 
