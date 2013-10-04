@@ -154,7 +154,7 @@ namespace Amnesia
 				if (sessionId != Session.ID  || Session.IsRollbackPending)
 					return;
 
-				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, null))
+				using (Session.Tracker.Exclusive(WebServerLockTimeoutMS, Session.AsyncLog))
 				{
 					if (sessionId != Session.ID)
 						return;
