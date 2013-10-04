@@ -13,6 +13,7 @@ namespace Amnesia
 	public class Module : IHttpModule
 	{
 		static object REQUEST_ABORTED = new object();
+		static object REQUEST_STARTED = new object();		
 
 		static bool? moduleRegistered;
 
@@ -84,6 +85,9 @@ namespace Amnesia
 					throw new ApplicationException("Transaction was aborted and is awaiting rollback");
 
 				Session.Tracker.StartActivity();
+				
+				// If a previous module aborts the request, begin request never runs
+				HttpContext.Current.Items[REQUEST_STARTED] = true;
 			}
 			catch(Exception err)
 			{
@@ -98,7 +102,9 @@ namespace Amnesia
 
 		void context_EndRequest(object sender, EventArgs e)
 		{
-			if (HttpContext.Current.Items[REQUEST_ABORTED] == null)
+			// ensure the request has actually begun (in cases of premature module abortion)
+			if (HttpContext.Current.Items[REQUEST_ABORTED] == null &&
+				HttpContext.Current.Items[REQUEST_STARTED] != null)
 				Session.Tracker.EndActivity();
 		}
 
