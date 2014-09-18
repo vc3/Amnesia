@@ -89,10 +89,10 @@ namespace Amnesia
 				{
 					ctx.Response.Write(string.Format(@"<a href='?cmd=end'>End Session</a><br/>"));
 					
-					ctx.Response.Write(string.Format(@"ID: {0}</br>", Session.ID));
+					ctx.Response.Write(string.Format(@"ID: {0}<br/>", Session.ID));
 
 					if (Session.Transaction != null)
-						ctx.Response.Write(string.Format(@"Transaction: {0}</br>", Session.Transaction.TransactionInformation.Status));
+						ctx.Response.Write(string.Format(@"Transaction: {0}<br/>", Session.Transaction.TransactionInformation.Status));
 				}
 				ctx.Response.Write(@"<br /><br /><a href='?cmd=status'>Refresh Status</a>");
 
