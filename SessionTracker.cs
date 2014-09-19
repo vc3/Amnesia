@@ -118,7 +118,10 @@ namespace Amnesia
 			if (activity == null)
 				throw new InvalidOperationException("Expected to join into an existing activity but there is not one");
 
-			++activity.ThreadCount;
+			lock (fieldsLock)
+			{
+				++activity.ThreadCount;
+			}
 
 			return activity;
 		}
